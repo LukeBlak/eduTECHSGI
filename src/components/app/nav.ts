@@ -13,7 +13,6 @@ import {
   UserCircle,
   CalendarRange,
   Trophy,
-  Database,
   BellRing,
   ClipboardList,
   Award,
@@ -35,7 +34,6 @@ export type SectionId =
   | "reportes"
   | "ingresos"
   | "egresos"
-  | "firebase"
   | "notificaciones"
   | "perfil";
 
@@ -163,14 +161,6 @@ export const NAV_ITEMS: NavItem[] = [
     icon: FileSpreadsheet,
     description: "Descarga de reportes Excel y Word",
     group: "finanzas",
-    privilegedOnly: true,
-  },
-  {
-    id: "firebase",
-    label: "Firebase",
-    icon: Database,
-    description: "Conexión y sincronización con Firebase",
-    group: "sistema",
     privilegedOnly: true,
   },
   {

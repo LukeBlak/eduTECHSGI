@@ -20,7 +20,6 @@ import { LogrosSection } from "./sections/LogrosSection";
 import { ReportesSection } from "./sections/ReportesSection";
 import { IngresosSection } from "./sections/IngresosSection";
 import { EgresosSection } from "./sections/EgresosSection";
-import { FirebaseSection } from "./sections/FirebaseSection";
 import { NotificationsSection } from "./sections/NotificationsSection";
 import { PerfilSection } from "./sections/PerfilSection";
 import { RealtimeProvider } from "./realtime/RealtimeProvider";
@@ -45,7 +44,6 @@ function renderSection(active: SectionId) {
     case "reportes": return <ReportesSection />;
     case "ingresos": return <IngresosSection />;
     case "egresos": return <EgresosSection />;
-    case "firebase": return <FirebaseSection />;
     case "notificaciones": return <NotificationsSection />;
     case "perfil": return <PerfilSection />;
     default: return <DashboardSection />;

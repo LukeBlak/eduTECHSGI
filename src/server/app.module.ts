@@ -6,7 +6,7 @@
  * Para añadir un nuevo módulo: crearlo en `src/server/modules/<feature>/` y
  * agregar su import aquí.
  */
-import '@/server/core/prisma.provider';
+import '@/server/core/firestore.provider';
 
 // Módulos de infraestructura (cargar primero: otros módulos dependen de ellos)
 import '@/server/modules/notifications/notifications.module';
@@ -24,6 +24,5 @@ import '@/server/modules/expenses/expenses.module';
 import '@/server/modules/achievements/achievements.module';
 import '@/server/modules/dashboard/dashboard.module';
 import '@/server/modules/reports/reports.module';
-import '@/server/modules/firebase/firebase.module';
 
 export const AppReady = true;

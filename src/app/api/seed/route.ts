@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcryptjs';
-import { db } from '@/lib/db';
+import {
+  COLLECTIONS,
+  type CollectionName,
+  create,
+  deleteMany,
+} from '@/lib/firestore-helpers';
 
 /**
- * Inicializa la base de datos para producción.
+ * Inicializa la base de datos Firestore para producción.
  *
- * Borra TODOS los datos existentes (voluntarios, comités, logros, horas
- * sociales, actividades, clases, ingresos, egresos, notificaciones) y crea
- * únicamente un usuario administrador con credenciales frescas.
+ * Borra TODOS los documentos de todas las colecciones y crea únicamente
+ * un usuario administrador con credenciales frescas.
  *
  * El admin puede luego, desde la UI, crear comités, registrar voluntarios
  * y asignar roles de presidente / vicepresidente / líder de comité.
@@ -16,9 +20,8 @@ import { db } from '@/lib/db';
  *   Carnet: 10000001
  *   Contraseña: EduTECH@2025
  *
- * SEGURIDAD: Este endpoint es DESTRUCTIVO. Para evitar que cualquier visitante
- * borre la BD, requiere la variable de entorno SEED_SECRET configurada en el
- * servidor y que la petición incluya el header `x-seed-secret` con el mismo valor.
+ * SEGURIDAD: Este endpoint es DESTRUCTIVO. Requiere la variable de entorno
+ * SEED_SECRET configurada y el header `x-seed-secret` con el mismo valor.
  *
  * Uso (tras desplegar en Vercel):
  *   curl -X POST https://TU_DOMINIO/api/seed \
@@ -54,48 +57,40 @@ export async function POST(req: Request) {
     }
 
     // ---------------------------------------------------------------
-    // 1) Limpiar TODA la base de datos (orden respetando foreign keys).
+    // 1) Limpiar TODAS las colecciones (Firestore no tiene FK cascade).
     // ---------------------------------------------------------------
-    // Hijas primero, luego padres.
-    await db.volunteerAchievement.deleteMany();
-    await db.hourRequest.deleteMany();
-    await db.socialHour.deleteMany();
-    await db.activityVolunteer.deleteMany();
-    await db.classVolunteer.deleteMany();
-    await db.expense.deleteMany();
-    await db.income.deleteMany();
-    await db.class.deleteMany();
-    await db.activity.deleteMany();
-    await db.notification.deleteMany();
-    await db.achievement.deleteMany();
-    await db.committee.deleteMany();
-    await db.volunteer.deleteMany();
+    const allCollections = Object.keys(COLLECTIONS) as CollectionName[];
+    const deletedCounts: Record<string, number> = {};
+    await Promise.all(
+      allCollections.map(async (col) => {
+        const n = await deleteMany(col);
+        deletedCounts[col] = n;
+      }),
+    );
 
     // ---------------------------------------------------------------
     // 2) Crear el único administrador.
     // ---------------------------------------------------------------
     const hash = await bcrypt.hash(ADMIN_PASSWORD, 10);
-    await db.volunteer.create({
-      data: {
-        name: ADMIN_NAME,
-        studentId: ADMIN_CARNET,
-        career: 'Ingeniería de Software y Negocios Digitales (ISND)',
-        email: ADMIN_EMAIL,
-        phone: '6000-0000',
-        password: hash,
-        role: 'admin',
-      },
+    await create('volunteers', {
+      name: ADMIN_NAME,
+      studentId: ADMIN_CARNET,
+      career: 'Ingeniería de Software y Negocios Digitales (ISND)',
+      email: ADMIN_EMAIL,
+      phone: '6000-0000',
+      password: hash,
+      role: 'admin',
+      committeeId: null,
     });
 
     return NextResponse.json({
       success: true,
       message: 'Base de datos inicializada para producción. Se creó 1 administrador.',
+      deletedCounts,
       admin: {
         carnet: ADMIN_CARNET,
         name: ADMIN_NAME,
         email: ADMIN_EMAIL,
-        // No devolvemos la contraseña en la respuesta por seguridad,
-        // pero sí la indicamos una sola vez para que el operador la registre.
         tempPassword: ADMIN_PASSWORD,
       },
     });

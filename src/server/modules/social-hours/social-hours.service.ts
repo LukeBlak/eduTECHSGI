@@ -1,5 +1,14 @@
+/**
+ * Social Hours Service — CRUD de horas sociales + aprobación/rechazo.
+ *
+ * Migrado de Prisma a Firestore. Los `include` de Prisma se reemplazan por
+ * lookups manuales encadenados (Firestore no tiene JOINs nativos).
+ *
+ * El include `volunteer + activity + reviewer` (3-way join) se resuelve con
+ * 3 lookups paralelos por registro.
+ */
 import { inject, Injectable } from '@/server/core/container';
-import { PRISMA_TOKEN } from '@/server/core/prisma.provider';
+import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
 import { canApproveHours } from '@/server/core/auth.guard';
@@ -7,21 +16,94 @@ import type { Role } from '@/server/core/jwt.util';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
 import type { CreateSocialHourInput, UpdateSocialHourInput } from './dto/social-hours.dto';
 
+interface VolunteerDoc {
+  id: string;
+  name: string;
+  studentId: string;
+  career: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: 'admin' | 'volunteer' | 'committee_leader' | 'president' | 'vice_president';
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ActivityDoc {
+  id: string;
+  title: string;
+  description: string;
+  objectives: string;
+  impact: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  hours: number;
+  hourType: 'admin' | 'field';
+  capacity: number | null;
+  status: 'active' | 'completed';
+  completedAt: string | null;
+  beneficiariesMen: number;
+  beneficiariesWomen: number;
+  ods: string;
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SocialHourDoc {
+  id: string;
+  volunteerId: string;
+  activityId: string | null;
+  hours: number;
+  type: 'admin' | 'field';
+  date: string;
+  notes: string;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  reviewerId: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class SocialHoursService {
-  private readonly db = inject<typeof import('@prisma/client').PrismaClient>(PRISMA_TOKEN);
+  private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
   private readonly notifications = inject(NotificationsService);
   private readonly achievements = inject(AchievementsService);
 
+  /**
+   * Adjeta `volunteer`, `activity` y `reviewer` (3-way join manual).
+   * `reviewer` es una self-FK a Volunteer (puede ser null si la hora fue
+   * auto-aprobada por sistema o el reviewer fue eliminado).
+   */
+  private async enrichHour(h: SocialHourDoc) {
+    const [volunteer, activity, reviewer] = await Promise.all([
+      h.volunteerId
+        ? this.fs.findById<VolunteerDoc>('volunteers', h.volunteerId)
+        : Promise.resolve(null),
+      h.activityId
+        ? this.fs.findById<ActivityDoc>('activities', h.activityId)
+        : Promise.resolve(null),
+      h.reviewerId
+        ? this.fs.findById<VolunteerDoc>('volunteers', h.reviewerId)
+        : Promise.resolve(null),
+    ]);
+    return { ...h, volunteer, activity, reviewer };
+  }
+
   async list(volunteerId?: string, filters: { approvalStatus?: string } = {}) {
-    return this.db.socialHour.findMany({
-      where: {
-        ...(volunteerId ? { volunteerId } : {}),
-        ...(filters.approvalStatus ? { approvalStatus: filters.approvalStatus as any } : {}),
-      },
-      include: { volunteer: true, activity: true, reviewer: true },
-      orderBy: { date: 'desc' },
+    const where: Record<string, unknown> = {};
+    if (volunteerId) where.volunteerId = volunteerId;
+    if (filters.approvalStatus) where.approvalStatus = filters.approvalStatus;
+    const hours = await this.fs.findAll<SocialHourDoc>('socialHours', {
+      where,
+      orderBy: { field: 'date', direction: 'desc' },
     });
+    return Promise.all(hours.map((h) => this.enrichHour(h)));
   }
 
   /**
@@ -31,22 +113,21 @@ export class SocialHoursService {
    */
   async create(input: CreateSocialHourInput, creatorRole?: Role, creatorId?: string) {
     const approver = canApproveHours(creatorRole);
-    const approvalStatus = input.pendingApproval && !approver ? 'pending' : 'approved';
+    const approvalStatus: 'pending' | 'approved' = input.pendingApproval && !approver ? 'pending' : 'approved';
 
-    const created = await this.db.socialHour.create({
-      data: {
-        volunteerId: input.volunteerId,
-        activityId: input.activityId || null,
-        hours: input.hours,
-        type: input.type,
-        date: input.date ?? new Date().toISOString().slice(0, 10),
-        notes: input.notes ?? '',
-        approvalStatus,
-        reviewerId: approver && creatorId ? creatorId : null,
-        reviewedAt: approver ? new Date() : null,
-      },
-      include: { volunteer: true, activity: true, reviewer: true },
+    const created = await this.fs.create<SocialHourDoc>('socialHours', {
+      volunteerId: input.volunteerId,
+      activityId: input.activityId || null,
+      hours: input.hours,
+      type: input.type,
+      date: input.date ?? new Date().toISOString().slice(0, 10),
+      notes: input.notes ?? '',
+      approvalStatus,
+      reviewerId: approver && creatorId ? creatorId : null,
+      reviewedAt: approver ? new Date().toISOString() : null,
     });
+
+    const enriched = await this.enrichHour(created);
 
     // Notifica al voluntario.
     void this.notifications.create({
@@ -60,12 +141,17 @@ export class SocialHoursService {
         approvalStatus === 'approved'
           ? `Se te aprobaron ${created.hours} hora(s) social(es) de tipo ${
               created.type === 'admin' ? 'administrativa' : 'de campo'
-            }${created.activity ? ` en "${created.activity.title}"` : ''}.`
+            }${enriched.activity ? ` en "${enriched.activity.title}"` : ''}.`
           : `Registraste ${created.hours} hora(s) social(es) de tipo ${
               created.type === 'admin' ? 'administrativa' : 'de campo'
-            }${created.activity ? ` en "${created.activity.title}"` : ''}. Quedan pendientes de aprobación por un líder/presidente/vice.`,
+            }${enriched.activity ? ` en "${enriched.activity.title}"` : ''}. Quedan pendientes de aprobación por un líder/presidente/vice.`,
       link: '/horas',
-      metadata: { hours: created.hours, type: created.type, activityId: created.activityId, approvalStatus },
+      metadata: {
+        hours: created.hours,
+        type: created.type,
+        activityId: created.activityId,
+        approvalStatus,
+      },
     });
 
     if (approvalStatus === 'pending') {
@@ -73,9 +159,15 @@ export class SocialHoursService {
       void this.notifications.notifyAdmins({
         type: 'social_hour',
         title: `Hora social pendiente de aprobación`,
-        message: `${created.volunteer?.name ?? 'Un voluntario'} registró ${created.hours}h (${created.type === 'admin' ? 'admin' : 'campo'})${created.activity ? ` en "${created.activity.title}"` : ''}. Revisa y aprueba/rechaza desde la sección Horas Sociales.`,
+        message: `${enriched.volunteer?.name ?? 'Un voluntario'} registró ${created.hours}h (${
+          created.type === 'admin' ? 'admin' : 'campo'
+        })${enriched.activity ? ` en "${enriched.activity.title}"` : ''}. Revisa y aprueba/rechaza desde la sección Horas Sociales.`,
         link: '/horas',
-        metadata: { socialHourId: created.id, volunteerId: created.volunteerId, hours: created.hours },
+        metadata: {
+          socialHourId: created.id,
+          volunteerId: created.volunteerId,
+          hours: created.hours,
+        },
       });
     }
 
@@ -89,7 +181,9 @@ export class SocialHoursService {
     void realtime.refreshDashboard({ reason: 'social-hour:created' });
     // Avisar al propio voluntario para que su perfil se actualice.
     if (created.volunteerId) {
-      void realtime.emitToUser(created.volunteerId, 'dashboard:refresh', { reason: 'own-hours-changed' });
+      void realtime.emitToUser(created.volunteerId, 'dashboard:refresh', {
+        reason: 'own-hours-changed',
+      });
     }
 
     // Si la hora quedó aprobada, evaluar logros automáticos del voluntario.
@@ -101,15 +195,17 @@ export class SocialHoursService {
         );
     }
 
-    return created;
+    return enriched;
   }
 
   async update(id: string, input: UpdateSocialHourInput) {
-    return this.db.socialHour.update({
-      where: { id },
-      data: input as any,
-      include: { volunteer: true, activity: true, reviewer: true },
-    });
+    // Firestore no acepta `undefined` en los payloads — limpiar.
+    const data: Record<string, unknown> = { ...input };
+    Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
+    await this.fs.update<SocialHourDoc>('socialHours', id, data);
+    const updated = await this.fs.findById<SocialHourDoc>('socialHours', id);
+    if (!updated) throw new Error('Hora social no encontrada');
+    return this.enrichHour(updated);
   }
 
   /**
@@ -117,22 +213,32 @@ export class SocialHoursService {
    * Solo líderes/presidente/vice/admin pueden aprobar.
    */
   async approve(id: string, reviewerId: string) {
-    const hour = await this.db.socialHour.findUnique({
-      where: { id },
-      include: { volunteer: true, activity: true },
-    });
+    const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
 
-    const updated = await this.db.socialHour.update({
-      where: { id },
-      data: {
-        approvalStatus: 'approved',
-        reviewerId,
-        reviewedAt: new Date(),
-        rejectionReason: '',
-      },
-      include: { volunteer: true, activity: true, reviewer: true },
+    // Snapshot previo de volunteer/activity para notificaciones (antes de
+    // cambiar el doc — aunque estos FKs no se tocan aquí, los necesitamos
+    // para el mensaje y para el return shape con includes).
+    const [volunteer, activity] = await Promise.all([
+      hour.volunteerId
+        ? this.fs.findById<VolunteerDoc>('volunteers', hour.volunteerId)
+        : Promise.resolve(null),
+      hour.activityId
+        ? this.fs.findById<ActivityDoc>('activities', hour.activityId)
+        : Promise.resolve(null),
+    ]);
+
+    await this.fs.update<SocialHourDoc>('socialHours', id, {
+      approvalStatus: 'approved',
+      reviewerId,
+      reviewedAt: new Date().toISOString(),
+      rejectionReason: '',
     });
+
+    const updated = await this.fs.findById<SocialHourDoc>('socialHours', id);
+    if (!updated) throw new Error('Hora social no encontrada tras actualizar');
+    const reviewer = await this.fs.findById<VolunteerDoc>('volunteers', reviewerId);
+    const enriched = { ...updated, volunteer, activity, reviewer };
 
     // Caso 3: notificar al voluntario que se aprobaron sus horas.
     void this.notifications.create({
@@ -140,7 +246,7 @@ export class SocialHoursService {
       type: 'social_hour',
       title: `¡Horas aprobadas! +${hour.hours}h`,
       message: `Tu registro de ${hour.hours} hora(s) social(es)${
-        hour.activity ? ` en "${hour.activity.title}"` : ''
+        activity ? ` en "${activity.title}"` : ''
       } fue aprobado. Total acumulado revisa tu perfil.`,
       link: '/perfil',
       metadata: { socialHourId: id, hours: hour.hours, approved: true },
@@ -154,7 +260,9 @@ export class SocialHoursService {
     });
     void realtime.refreshDashboard({ reason: 'social-hour:approved' });
     if (hour.volunteerId) {
-      void realtime.emitToUser(hour.volunteerId, 'dashboard:refresh', { reason: 'own-hours-approved' });
+      void realtime.emitToUser(hour.volunteerId, 'dashboard:refresh', {
+        reason: 'own-hours-approved',
+      });
     }
 
     // Evaluar logros automáticos del voluntario (puede haber desbloqueado nuevos).
@@ -166,34 +274,41 @@ export class SocialHoursService {
         );
     }
 
-    return updated;
+    return enriched;
   }
 
   /** Rechaza una hora social. */
   async reject(id: string, reviewerId: string, reason: string = '') {
-    const hour = await this.db.socialHour.findUnique({
-      where: { id },
-      include: { volunteer: true, activity: true },
-    });
+    const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
 
-    const updated = await this.db.socialHour.update({
-      where: { id },
-      data: {
-        approvalStatus: 'rejected',
-        reviewerId,
-        reviewedAt: new Date(),
-        rejectionReason: reason,
-      },
-      include: { volunteer: true, activity: true, reviewer: true },
+    const [volunteer, activity] = await Promise.all([
+      hour.volunteerId
+        ? this.fs.findById<VolunteerDoc>('volunteers', hour.volunteerId)
+        : Promise.resolve(null),
+      hour.activityId
+        ? this.fs.findById<ActivityDoc>('activities', hour.activityId)
+        : Promise.resolve(null),
+    ]);
+
+    await this.fs.update<SocialHourDoc>('socialHours', id, {
+      approvalStatus: 'rejected',
+      reviewerId,
+      reviewedAt: new Date().toISOString(),
+      rejectionReason: reason,
     });
+
+    const updated = await this.fs.findById<SocialHourDoc>('socialHours', id);
+    if (!updated) throw new Error('Hora social no encontrada tras actualizar');
+    const reviewer = await this.fs.findById<VolunteerDoc>('volunteers', reviewerId);
+    const enriched = { ...updated, volunteer, activity, reviewer };
 
     void this.notifications.create({
       userId: hour.volunteerId,
       type: 'social_hour',
       title: `Horas no aprobadas: ${hour.hours}h`,
       message: `Tu registro de ${hour.hours} hora(s) social(es)${
-        hour.activity ? ` en "${hour.activity.title}"` : ''
+        activity ? ` en "${activity.title}"` : ''
       } no fue aprobado.${reason ? ` Motivo: ${reason}` : ''}`,
       link: '/horas',
       metadata: { socialHourId: id, hours: hour.hours, rejected: true, reason },
@@ -206,14 +321,16 @@ export class SocialHoursService {
     });
     void realtime.refreshDashboard({ reason: 'social-hour:rejected' });
     if (hour.volunteerId) {
-      void realtime.emitToUser(hour.volunteerId, 'dashboard:refresh', { reason: 'own-hours-rejected' });
+      void realtime.emitToUser(hour.volunteerId, 'dashboard:refresh', {
+        reason: 'own-hours-rejected',
+      });
     }
 
-    return updated;
+    return enriched;
   }
 
   async remove(id: string) {
-    await this.db.socialHour.delete({ where: { id } });
+    await this.fs.remove('socialHours', id);
     void realtime.refreshDashboard({ reason: 'social-hour:deleted' });
     return { success: true };
   }

@@ -1,9 +1,79 @@
+/**
+ * Activities Service — CRUD de actividades, inscripciones y finalización.
+ *
+ * Migrado de Prisma a Firestore. Los `include` de Prisma se reemplazan por
+ * lookups manuales encadenados (Firestore no tiene JOINs nativos).
+ */
 import { inject, Injectable } from '@/server/core/container';
-import { PRISMA_TOKEN } from '@/server/core/prisma.provider';
+import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
 import type { CreateActivityInput, UpdateActivityInput } from './dto/activities.dto';
+
+interface VolunteerDoc {
+  id: string;
+  name: string;
+  studentId: string;
+  email: string;
+  [k: string]: unknown;
+}
+
+interface CommitteeDoc {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ActivityDoc {
+  id: string;
+  title: string;
+  description: string;
+  objectives: string;
+  impact: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  hours: number;
+  hourType: 'admin' | 'field';
+  capacity: number | null;
+  status: 'active' | 'completed';
+  completedAt: string | null;
+  beneficiariesMen: number;
+  beneficiariesWomen: number;
+  ods: string;
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ActivityVolunteerDoc {
+  id: string;
+  activityId: string;
+  volunteerId: string;
+  status: 'registered' | 'waitlist' | 'cancelled';
+  createdAt: string;
+}
+
+interface SocialHourDoc {
+  id: string;
+  volunteerId: string;
+  activityId: string | null;
+  hours: number;
+  type: 'admin' | 'field';
+  date: string;
+  notes: string;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  reviewerId: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 /** Resultado de una operación de inscripción a una actividad. */
 export interface SubscribeResult {
@@ -32,66 +102,132 @@ export interface CompleteResult {
 
 @Injectable()
 export class ActivitiesService {
-  private readonly db = inject<typeof import('@prisma/client').PrismaClient>(PRISMA_TOKEN);
+  private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
   private readonly notifications = inject(NotificationsService);
   private readonly achievements = inject(AchievementsService);
 
   async list() {
-    const items = await this.db.activity.findMany({
-      include: {
-        committee: true,
-        volunteers: { include: { volunteer: true } },
-        _count: { select: { socialHours: true } },
-      },
-      orderBy: { createdAt: 'desc' },
+    const activities = await this.fs.findAll<ActivityDoc>('activities', {
+      orderBy: { field: 'createdAt', direction: 'desc' },
     });
+    const items = await Promise.all(
+      activities.map(async (a) => {
+        const [committee, activityVolunteers, socialHoursCount] = await Promise.all([
+          a.committeeId
+            ? this.fs.findById<CommitteeDoc>('committees', a.committeeId)
+            : Promise.resolve(null),
+          this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+            where: { activityId: a.id },
+          }),
+          this.fs.count('socialHours', { where: { activityId: a.id } }),
+        ]);
+        const volunteers = await Promise.all(
+          activityVolunteers.map(async (av) => {
+            const volunteer = av.volunteerId
+              ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+              : null;
+            return { ...av, volunteer };
+          }),
+        );
+        return { ...a, committee, volunteers, _count: { socialHours: socialHoursCount } };
+      }),
+    );
     return items.map((a) => this.serialize(a));
   }
 
   async getById(id: string) {
-    const a = await this.db.activity.findUnique({
-      where: { id },
-      include: {
-        committee: true,
-        volunteers: { include: { volunteer: true } },
-        socialHours: { include: { volunteer: true } },
-      },
-    });
+    const a = await this.fs.findById<ActivityDoc>('activities', id);
     if (!a) return null;
+
+    const [committee, activityVolunteers, socialHours] = await Promise.all([
+      a.committeeId
+        ? this.fs.findById<CommitteeDoc>('committees', a.committeeId)
+        : Promise.resolve(null),
+      this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', { where: { activityId: id } }),
+      this.fs.findAll<SocialHourDoc>('socialHours', { where: { activityId: id } }),
+    ]);
+
+    const [volunteers, socialHoursWithVolunteer] = await Promise.all([
+      Promise.all(
+        activityVolunteers.map(async (av) => {
+          const volunteer = av.volunteerId
+            ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+            : null;
+          return { ...av, volunteer };
+        }),
+      ),
+      Promise.all(
+        socialHours.map(async (sh) => {
+          const volunteer = sh.volunteerId
+            ? await this.fs.findById<VolunteerDoc>('volunteers', sh.volunteerId)
+            : null;
+          return { ...sh, volunteer };
+        }),
+      ),
+    ]);
+
+    const activityWithIncludes = { ...a, committee, volunteers, socialHours: socialHoursWithVolunteer };
     return {
-      ...this.serialize(a),
-      socialHours: a.socialHours,
+      ...this.serialize(activityWithIncludes),
+      socialHours: socialHoursWithVolunteer,
     };
   }
 
   async create(input: CreateActivityInput) {
     const { volunteerIds = [], ods = [], capacity = null, hourType = 'field', ...rest } = input;
-    const created = await this.db.activity.create({
-      data: {
-        title: rest.title,
-        description: rest.description ?? '',
-        objectives: rest.objectives ?? '',
-        impact: rest.impact ?? '',
-        type: rest.type ?? 'EduTECH ESEN',
-        startDate: rest.startDate ?? '',
-        endDate: rest.endDate ?? '',
-        location: rest.location ?? '',
-        hours: rest.hours ?? 0,
-        hourType,
-        capacity: capacity ?? null,
-        beneficiariesMen: rest.beneficiariesMen ?? 0,
-        beneficiariesWomen: rest.beneficiariesWomen ?? 0,
-        ods: ods.join(', '),
-        committeeId: rest.committeeId || null,
-        volunteers:
-          volunteerIds.length > 0
-            ? { create: volunteerIds.map((volunteerId) => ({ volunteerId })) }
-            : undefined,
-      },
-      include: { committee: true, volunteers: { include: { volunteer: true } } },
+
+    const created = await this.fs.create<ActivityDoc>('activities', {
+      title: rest.title,
+      description: rest.description ?? '',
+      objectives: rest.objectives ?? '',
+      impact: rest.impact ?? '',
+      type: rest.type ?? 'EduTECH ESEN',
+      startDate: rest.startDate ?? '',
+      endDate: rest.endDate ?? '',
+      location: rest.location ?? '',
+      hours: rest.hours ?? 0,
+      hourType,
+      capacity: capacity ?? null,
+      status: 'active',
+      beneficiariesMen: rest.beneficiariesMen ?? 0,
+      beneficiariesWomen: rest.beneficiariesWomen ?? 0,
+      ods: ods.join(', '),
+      committeeId: rest.committeeId || null,
     });
 
-    const assignedVolunteers = created.volunteers.map((av) => av.volunteer);
+    // Crea los ActivityVolunteer para cada volunteerId (la "tablas de unión").
+    if (volunteerIds.length > 0) {
+      await Promise.all(
+        volunteerIds.map((vid) =>
+          this.fs.create<ActivityVolunteerDoc>('activityVolunteers', {
+            activityId: created.id,
+            volunteerId: vid,
+            status: 'registered',
+          }),
+        ),
+      );
+    }
+
+    // Embed committee + volunteers para preservar el shape del retorno de Prisma.
+    const committee = created.committeeId
+      ? await this.fs.findById<CommitteeDoc>('committees', created.committeeId)
+      : null;
+    const activityVolunteers = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+      where: { activityId: created.id },
+    });
+    const volunteers = await Promise.all(
+      activityVolunteers.map(async (av) => {
+        const volunteer = av.volunteerId
+          ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+          : null;
+        return { ...av, volunteer };
+      }),
+    );
+    const createdWithIncludes = { ...created, committee, volunteers };
+
+    const assignedVolunteers = volunteers
+      .map((av) => av.volunteer)
+      .filter((v): v is VolunteerDoc => !!v);
 
     // Caso 4: "Al crear una nueva actividad" — notificar a TODOS los voluntarios.
     void this.notifications.notifyAllVolunteers({
@@ -121,7 +257,11 @@ export class ActivitiesService {
     void this.notifications.notifyAdmins({
       type: 'activity',
       title: `Nueva actividad creada: ${created.title}`,
-      message: `Actividad "${created.title}"${created.committee ? ` (${created.committee.name})` : ''} con ${assignedVolunteers.length} voluntario(s) asignado(s) y capacidad ${capacity ?? 'ilimitada'}.`,
+      message: `Actividad "${created.title}"${
+        committee ? ` (${committee.name})` : ''
+      } con ${assignedVolunteers.length} voluntario(s) asignado(s) y capacidad ${
+        capacity ?? 'ilimitada'
+      }.`,
       link: '/actividades',
       metadata: { activityId: created.id },
     });
@@ -133,39 +273,72 @@ export class ActivitiesService {
     });
     void realtime.refreshDashboard({ reason: 'activity:created' });
 
-    return this.serialize(created);
+    return this.serialize(createdWithIncludes);
   }
 
   async update(id: string, input: UpdateActivityInput) {
     const { volunteerIds, ods, capacity, hourType, ...rest } = input;
-    if (ods) rest.ods = ods.join(', ') as any;
+    if (ods) rest.ods = ods.join(', ');
     if (capacity !== undefined) rest.capacity = capacity ?? null;
-    if (hourType !== undefined) rest.hourType = hourType as any;
-    if (rest.committeeId !== undefined) rest.committeeId = (rest.committeeId || null) as any;
+    if (hourType !== undefined) rest.hourType = hourType as 'admin' | 'field';
+    if (rest.committeeId !== undefined) rest.committeeId = rest.committeeId || null;
 
     if (volunteerIds) {
-      await this.db.activityVolunteer.deleteMany({ where: { activityId: id } });
+      await this.fs.deleteMany('activityVolunteers', { where: { activityId: id } });
       if (volunteerIds.length > 0) {
-        await this.db.activityVolunteer.createMany({
-          data: volunteerIds.map((volunteerId) => ({ activityId: id, volunteerId })),
-        });
+        await Promise.all(
+          volunteerIds.map((vid) =>
+            this.fs.create<ActivityVolunteerDoc>('activityVolunteers', {
+              activityId: id,
+              volunteerId: vid,
+              status: 'registered',
+            }),
+          ),
+        );
       }
     }
 
-    const updated = await this.db.activity.update({
-      where: { id },
-      data: rest as any,
-      include: { committee: true, volunteers: { include: { volunteer: true } } },
+    const data: Record<string, unknown> = { ...rest };
+    // Firestore no acepta `undefined` en los payloads — limpiar.
+    Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
+
+    await this.fs.update<ActivityDoc>('activities', id, data);
+
+    const updated = await this.fs.findById<ActivityDoc>('activities', id);
+    const committee = updated?.committeeId
+      ? await this.fs.findById<CommitteeDoc>('committees', updated.committeeId)
+      : null;
+    const activityVolunteers = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+      where: { activityId: id },
     });
+    const volunteers = await Promise.all(
+      activityVolunteers.map(async (av) => {
+        const volunteer = av.volunteerId
+          ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+          : null;
+        return { ...av, volunteer };
+      }),
+    );
+    const updatedWithIncludes = { ...updated, committee, volunteers };
+
     void realtime.emit(REALTIME_EVENTS.ACTIVITY_UPDATED, {
       activityId: id,
     });
     void realtime.refreshDashboard({ reason: 'activity:updated' });
-    return this.serialize(updated);
+    return this.serialize(updatedWithIncludes);
   }
 
   async remove(id: string) {
-    await this.db.activity.delete({ where: { id } });
+    // Firestore no tiene FK cascade: limpiamos manualmente las relaciones.
+    // - activityVolunteers: onDelete: Cascade → borrar
+    // - socialHours.activity / expenses.activity / hourRequests.activity: onDelete: SetNull → desreferenciar
+    await Promise.all([
+      this.fs.deleteMany('activityVolunteers', { where: { activityId: id } }),
+      this.fs.updateMany('socialHours', { where: { activityId: id } }, { activityId: null }),
+      this.fs.updateMany('expenses', { where: { activityId: id } }, { activityId: null }),
+      this.fs.updateMany('hourRequests', { where: { activityId: id } }, { activityId: null }),
+    ]);
+    await this.fs.remove('activities', id);
     void realtime.emit(REALTIME_EVENTS.ACTIVITY_DELETED, { activityId: id });
     void realtime.refreshDashboard({ reason: 'activity:deleted' });
     return { success: true };
@@ -173,7 +346,7 @@ export class ActivitiesService {
 
   /** Devuelve el conteo de inscritos confirmados (no en lista de espera ni cancelados). */
   async getRegisteredCount(activityId: string): Promise<number> {
-    return this.db.activityVolunteer.count({
+    return this.fs.count('activityVolunteers', {
       where: { activityId, status: 'registered' },
     });
   }
@@ -185,10 +358,7 @@ export class ActivitiesService {
    * No permite inscripciones si la actividad ya fue completada.
    */
   async subscribe(activityId: string, volunteerId: string): Promise<SubscribeResult> {
-    const activity = await this.db.activity.findUnique({
-      where: { id: activityId },
-      include: { committee: true },
-    });
+    const activity = await this.fs.findById<ActivityDoc>('activities', activityId);
     if (!activity) {
       return {
         success: false,
@@ -215,9 +385,10 @@ export class ActivitiesService {
       };
     }
 
-    // ¿Ya está inscrito?
-    const existing = await this.db.activityVolunteer.findUnique({
-      where: { activityId_volunteerId: { activityId, volunteerId } },
+    // ¿Ya está inscrito? (lookup por compound key activityId+volunteerId)
+    const existing = await this.fs.findOne<ActivityVolunteerDoc>('activityVolunteers', {
+      activityId,
+      volunteerId,
     });
     if (existing && existing.status === 'registered') {
       const count = await this.getRegisteredCount(activityId);
@@ -235,25 +406,24 @@ export class ActivitiesService {
 
     const count = await this.getRegisteredCount(activityId);
     const isFull = activity.capacity !== null && count >= activity.capacity;
-    const status = isFull ? 'waitlist' : 'registered';
+    const status: 'registered' | 'waitlist' = isFull ? 'waitlist' : 'registered';
 
     if (existing) {
       // Re-activar inscripción previa (cancelada o en espera)
-      await this.db.activityVolunteer.update({
-        where: { id: existing.id },
-        data: { status },
-      });
+      await this.fs.update<ActivityVolunteerDoc>('activityVolunteers', existing.id, { status });
     } else {
-      await this.db.activityVolunteer.create({
-        data: { activityId, volunteerId, status },
+      await this.fs.create<ActivityVolunteerDoc>('activityVolunteers', {
+        activityId,
+        volunteerId,
+        status,
       });
     }
 
     // Caso 2: "Subscripción a una actividad" — notificar al voluntario.
-    const volunteer = await this.db.volunteer.findUnique({
-      where: { id: volunteerId },
-      select: { name: true, email: true },
-    });
+    const volunteerDoc = await this.fs.findById<VolunteerDoc>('volunteers', volunteerId);
+    const volunteer = volunteerDoc
+      ? { name: volunteerDoc.name, email: volunteerDoc.email }
+      : null;
     if (volunteer) {
       void this.notifications.create({
         userId: volunteerId,
@@ -285,7 +455,9 @@ export class ActivitiesService {
         : `${volunteer?.name ?? 'Un voluntario'} se inscribió en "${activity.title}"`,
       message: isFull
         ? `La actividad "${activity.title}" está llena (${activity.capacity}/${activity.capacity}). ${volunteer?.name ?? ''} fue agregado a la lista de espera.`
-        : `${volunteer?.name ?? ''} se inscribió en "${activity.title}". Cupo: ${count + 1}${activity.capacity ? `/${activity.capacity}` : ''}.`,
+        : `${volunteer?.name ?? ''} se inscribió en "${activity.title}". Cupo: ${count + 1}${
+            activity.capacity ? `/${activity.capacity}` : ''
+          }.`,
       link: '/actividades',
       metadata: { activityId, volunteerId, status },
     });
@@ -316,7 +488,7 @@ export class ActivitiesService {
 
   /** Cancela la inscripción de un voluntario en una actividad. */
   async unsubscribe(activityId: string, volunteerId: string): Promise<SubscribeResult> {
-    const activity = await this.db.activity.findUnique({ where: { id: activityId } });
+    const activity = await this.fs.findById<ActivityDoc>('activities', activityId);
     if (!activity) {
       return {
         success: false,
@@ -330,8 +502,9 @@ export class ActivitiesService {
       };
     }
 
-    const existing = await this.db.activityVolunteer.findUnique({
-      where: { activityId_volunteerId: { activityId, volunteerId } },
+    const existing = await this.fs.findOne<ActivityVolunteerDoc>('activityVolunteers', {
+      activityId,
+      volunteerId,
     });
     if (!existing || existing.status === 'cancelled') {
       const count = await this.getRegisteredCount(activityId);
@@ -347,21 +520,21 @@ export class ActivitiesService {
       };
     }
 
-    await this.db.activityVolunteer.update({
-      where: { id: existing.id },
-      data: { status: 'cancelled' },
+    await this.fs.update<ActivityVolunteerDoc>('activityVolunteers', existing.id, {
+      status: 'cancelled',
     });
 
     // Si había lista de espera y se libera un cupo, promocionar al primero en espera.
     if (activity.capacity && activity.status === 'active') {
-      const waitlist = await this.db.activityVolunteer.findFirst({
+      const waitlistResults = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
         where: { activityId, status: 'waitlist' },
-        orderBy: { createdAt: 'asc' },
+        orderBy: { field: 'createdAt', direction: 'asc' },
+        limit: 1,
       });
+      const waitlist = waitlistResults[0] ?? null;
       if (waitlist) {
-        await this.db.activityVolunteer.update({
-          where: { id: waitlist.id },
-          data: { status: 'registered' },
+        await this.fs.update<ActivityVolunteerDoc>('activityVolunteers', waitlist.id, {
+          status: 'registered',
         });
         // Notificar al voluntario promovido.
         void this.notifications.create({
@@ -395,17 +568,33 @@ export class ActivitiesService {
 
   /** Devuelve las actividades en las que un voluntario está inscrito. */
   async listForVolunteer(volunteerId: string) {
-    const links = await this.db.activityVolunteer.findMany({
-      where: { volunteerId, status: { in: ['registered', 'waitlist'] } },
-      include: { activity: { include: { committee: true } } },
-      orderBy: { createdAt: 'desc' },
+    const links = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+      where: { volunteerId, status: { op: 'in', value: ['registered', 'waitlist'] } },
+      orderBy: { field: 'createdAt', direction: 'desc' },
     });
-    return links.map((l) => ({
-      ...l.activity,
-      ods: l.activity.ods ? l.activity.ods.split(',').map((s) => s.trim()).filter(Boolean) : [],
-      subscriptionStatus: l.status,
-      subscribedAt: l.createdAt,
-    }));
+    return Promise.all(
+      links.map(async (l) => {
+        const activity = l.activityId
+          ? await this.fs.findById<ActivityDoc>('activities', l.activityId)
+          : null;
+        let committee: CommitteeDoc | null = null;
+        if (activity?.committeeId) {
+          committee = await this.fs.findById<CommitteeDoc>('committees', activity.committeeId);
+        }
+        const activityWithCommittee = activity ? { ...activity, committee } : null;
+        return {
+          ...activityWithCommittee,
+          ods: activity?.ods
+            ? activity.ods
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : [],
+          subscriptionStatus: l.status,
+          subscribedAt: l.createdAt,
+        };
+      }),
+    );
   }
 
   /**
@@ -416,41 +605,49 @@ export class ActivitiesService {
    * Solo puede ejecutarlo un rol privilegiado (presidente/vice/líder/admin).
    */
   async complete(activityId: string, reviewerId: string): Promise<CompleteResult> {
-    const activity = await this.db.activity.findUnique({
-      where: { id: activityId },
-      include: {
-        volunteers: { include: { volunteer: true } },
-      },
-    });
-    if (!activity) {
+    const activityDoc = await this.fs.findById<ActivityDoc>('activities', activityId);
+    if (!activityDoc) {
       return {
         success: false,
         message: 'Actividad no encontrada',
         activityId,
         title: '',
         hoursPerVolunteer: 0,
-        hourType: activity?.hourType ?? 'field',
+        hourType: 'field',
         assignedCount: 0,
         skipped: [],
         alreadyCompleted: false,
       };
     }
 
-    if (activity.status === 'completed') {
+    if (activityDoc.status === 'completed') {
       return {
         success: false,
         message: 'La actividad ya fue finalizada anteriormente',
         activityId,
-        title: activity.title,
-        hoursPerVolunteer: activity.hours,
-        hourType: activity.hourType,
+        title: activityDoc.title,
+        hoursPerVolunteer: activityDoc.hours,
+        hourType: activityDoc.hourType,
         assignedCount: 0,
         skipped: [],
         alreadyCompleted: true,
       };
     }
 
-    const registered = activity.volunteers.filter((av) => av.status === 'registered');
+    const activityVolunteers = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+      where: { activityId },
+    });
+    const avsWithVolunteer = await Promise.all(
+      activityVolunteers.map(async (av) => {
+        const volunteer = av.volunteerId
+          ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+          : null;
+        return { ...av, volunteer };
+      }),
+    );
+    const activity = { ...activityDoc, volunteers: avsWithVolunteer };
+
+    const registered = avsWithVolunteer.filter((av) => av.status === 'registered');
     const skipped: { volunteerId: string; reason: string }[] = [];
     const assigned: { volunteerId: string; volunteerName: string; hours: number }[] = [];
 
@@ -459,9 +656,8 @@ export class ActivitiesService {
     const hourType = activity.hourType;
 
     // Verificar si ya existen horas creadas para esta actividad y no duplicar.
-    const existingHours = await this.db.socialHour.findMany({
+    const existingHours = await this.fs.findAll<SocialHourDoc>('socialHours', {
       where: { activityId },
-      select: { volunteerId: true },
     });
     const existingSet = new Set(existingHours.map((h) => h.volunteerId));
 
@@ -480,30 +676,28 @@ export class ActivitiesService {
         });
         continue;
       }
-      await this.db.socialHour.create({
-        data: {
-          volunteerId: av.volunteerId,
-          activityId: activity.id,
-          hours: hoursToAssign,
-          type: hourType,
-          date: new Date().toISOString().slice(0, 10),
-          notes: `Horas asignadas automáticamente al finalizar la actividad "${activity.title}"`,
-          approvalStatus: 'approved',
-          reviewerId,
-          reviewedAt: new Date(),
-        },
+      await this.fs.create<SocialHourDoc>('socialHours', {
+        volunteerId: av.volunteerId,
+        activityId: activity.id,
+        hours: hoursToAssign,
+        type: hourType,
+        date: new Date().toISOString().slice(0, 10),
+        notes: `Horas asignadas automáticamente al finalizar la actividad "${activity.title}"`,
+        approvalStatus: 'approved',
+        reviewerId,
+        reviewedAt: new Date().toISOString(),
       });
       assigned.push({
         volunteerId: av.volunteerId,
-        volunteerName: av.volunteer.name,
+        volunteerName: av.volunteer?.name ?? 'Voluntario',
         hours: hoursToAssign,
       });
     }
 
     // Marcar la actividad como completada
-    await this.db.activity.update({
-      where: { id: activityId },
-      data: { status: 'completed', completedAt: new Date() },
+    await this.fs.update<ActivityDoc>('activities', activityId, {
+      status: 'completed',
+      completedAt: new Date().toISOString(),
     });
 
     // Notificar a cada voluntario con horas asignadas
@@ -532,7 +726,9 @@ export class ActivitiesService {
       title: `Actividad finalizada: ${activity.title}`,
       message: `Se finalizó la actividad "${activity.title}". Se asignaron ${hoursToAssign}h de tipo ${
         hourType === 'admin' ? 'administrativa' : 'de campo'
-      } a ${assigned.length} voluntario(s) inscrito(s).${skipped.length > 0 ? ` ${skipped.length} omitido(s).` : ''}`,
+      } a ${assigned.length} voluntario(s) inscrito(s).${
+        skipped.length > 0 ? ` ${skipped.length} omitido(s).` : ''
+      }`,
       link: '/actividades',
       metadata: { activityId, assignedCount: assigned.length, hoursPerVolunteer: hoursToAssign },
     });
@@ -571,10 +767,5 @@ export class ActivitiesService {
       available: a.capacity ? Math.max(0, a.capacity - registeredCount) : null,
       capacityFull: a.capacity !== null && a.capacity !== undefined && registeredCount >= a.capacity,
     };
-  }
-
-  // Acceso directo al cliente para otros módulos (reports)
-  get raw() {
-    return this.db;
   }
 }

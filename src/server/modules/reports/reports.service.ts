@@ -3,8 +3,18 @@
  *  1. Excel "Memoria de Labores" (exceljs)
  *  2. Excel "Horas Sociales" (exceljs)
  *  3. Word "Plantilla de Proyecto ODS" (docx)
+ *  4. Excel "Balance Financiero" (exceljs)
  *
- * Mantiene los formatos del backend original (EduTECH ESEN), adaptados a Prisma/SQLite.
+ * Migrado de Prisma a Firestore. La lógica de generación Excel/docx es PURA
+ * (no toca la BD) — solo se migran las llamadas de fetching de datos. Los
+ * helpers `dateInRange`, `colLetter`, `buildProjectDataFromActivity`,
+ * `slugifyProjectName`, `monthStart`, `monthEnd` quedan sin cambios.
+ *
+ * Patrones aplicados (ver auth.service.ts / activities.service.ts para referencia):
+ *  - `findMany({ include: { committee, volunteers: { include: { volunteer } } } })`
+ *    → `findAll` + lookups manuales con maps indexados en memoria (evita N+1).
+ *  - `findMany({ orderBy: { field: 'asc' } })` → `findAll({ orderBy: { field, direction: 'asc' } })`.
+ *  - `findUnique({ where: { id } })` → `findById('coll', id)`.
  */
 import ExcelJS from 'exceljs';
 import {
@@ -18,9 +28,97 @@ import {
   TextRun,
 } from 'docx';
 import { inject, Injectable } from '@/server/core/container';
-import { PRISMA_TOKEN } from '@/server/core/prisma.provider';
+import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import fs from 'fs';
 import path from 'path';
+
+/** Doc de Activity tal como se almacena en Firestore. */
+interface ActivityDoc {
+  id: string;
+  title: string;
+  description: string;
+  objectives: string;
+  impact: string;
+  type: string;
+  startDate: string;
+  endDate: string;
+  location: string;
+  hours: number;
+  hourType: 'admin' | 'field';
+  capacity: number | null;
+  status: 'active' | 'completed';
+  completedAt: string | null;
+  beneficiariesMen: number;
+  beneficiariesWomen: number;
+  ods: string;
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CommitteeDoc {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface VolunteerDoc {
+  id: string;
+  name: string;
+  studentId: string;
+  committeeId: string | null;
+  [k: string]: unknown;
+}
+
+interface ActivityVolunteerDoc {
+  id: string;
+  activityId: string;
+  volunteerId: string;
+  status: 'registered' | 'waitlist' | 'cancelled';
+  createdAt: string;
+}
+
+interface SocialHourDoc {
+  id: string;
+  volunteerId: string;
+  activityId: string | null;
+  hours: number;
+  type: 'admin' | 'field';
+  date: string;
+  notes: string;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface IncomeDoc {
+  id: string;
+  date: string;
+  concept: string;
+  amount: number;
+  source: string;
+  category: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ExpenseDoc {
+  id: string;
+  date: string;
+  concept: string;
+  amount: number;
+  category: string;
+  paymentMethod: string;
+  beneficiary: string;
+  notes: string;
+  activityId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 const HEADER_FILL = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF4472C4' } };
 
@@ -101,7 +199,7 @@ function dateInRange(dateStr: string | null | undefined, period: PeriodFilter): 
 
 @Injectable()
 export class ReportsService {
-  private readonly db = inject<typeof import('@prisma/client').PrismaClient>(PRISMA_TOKEN);
+  private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
 
   /**
    * 1. Excel — Memoria de Labores. Sigue la estructura del documento oficial:
@@ -132,15 +230,45 @@ export class ReportsService {
     ];
     worksheet.columns = columns;
 
-    const allActivities = await this.db.activity.findMany({
-      include: { committee: true, volunteers: { include: { volunteer: true } } },
-      orderBy: { startDate: 'asc' },
-    });
+    // Cargar actividades + todas las colecciones relacionadas en paralelo
+    // para construir los `include` manualmente en memoria (sin N+1).
+    const [allActivitiesRaw, allCommittees, allActivityVolunteers, allVolunteers] =
+      await Promise.all([
+        this.fs.findAll<ActivityDoc>('activities', {
+          orderBy: { field: 'startDate', direction: 'asc' },
+        }),
+        this.fs.findAll<CommitteeDoc>('committees'),
+        this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers'),
+        this.fs.findAll<VolunteerDoc>('volunteers'),
+      ]);
 
-    // Filtrar por rango de meses usando startDate de la actividad
-    const activities = allActivities.filter((act) =>
-      dateInRange(act.startDate, period),
-    );
+    // Indexar para lookups O(1) por actividad.
+    const committeeById = new Map(allCommittees.map((c) => [c.id, c]));
+    const volunteerById = new Map(allVolunteers.map((v) => [v.id, v]));
+    const avsByActivity = new Map<string, ActivityVolunteerDoc[]>();
+    for (const av of allActivityVolunteers) {
+      const arr = avsByActivity.get(av.activityId) ?? [];
+      arr.push(av);
+      avsByActivity.set(av.activityId, arr);
+    }
+
+    // Reconstruir el shape de Prisma `include: { committee, volunteers: { include: { volunteer } } }`
+    // y filtrar por rango de meses usando startDate de la actividad.
+    const activities = allActivitiesRaw
+      .filter((act) => dateInRange(act.startDate, period))
+      .map((act) => {
+        const committee = act.committeeId
+          ? (committeeById.get(act.committeeId) ?? null)
+          : null;
+        const avs = avsByActivity.get(act.id) ?? [];
+        const volunteers = avs.map((av) => ({
+          ...av,
+          volunteer: av.volunteerId
+            ? (volunteerById.get(av.volunteerId) ?? null)
+            : null,
+        }));
+        return { ...act, committee, volunteers };
+      });
 
     activities.forEach((act) => {
       const beneficiaries = (act.beneficiariesMen ?? 0) + (act.beneficiariesWomen ?? 0);
@@ -251,15 +379,18 @@ export class ReportsService {
     const worksheet = workbook.addWorksheet('Horas Sociales');
 
     // --- 1. Cargar datos ---
+    // El `include: { committee: true }` en volunteers y `include: { activity: true }`
+    // en socialHours no se usan en el matrix-building (se accede vía activityMap
+    // construido desde allActivities). Se omiten para minimizar llamadas.
     const [allVolunteers, allActivities, allHours] = await Promise.all([
-      this.db.volunteer.findMany({
-        include: { committee: true },
-        orderBy: { name: 'asc' },
+      this.fs.findAll<VolunteerDoc>('volunteers', {
+        orderBy: { field: 'name', direction: 'asc' },
       }),
-      this.db.activity.findMany({ orderBy: { startDate: 'asc' } }),
-      this.db.socialHour.findMany({
+      this.fs.findAll<ActivityDoc>('activities', {
+        orderBy: { field: 'startDate', direction: 'asc' },
+      }),
+      this.fs.findAll<SocialHourDoc>('socialHours', {
         where: { approvalStatus: 'approved' },
-        include: { activity: true },
       }),
     ]);
 
@@ -463,10 +594,10 @@ export class ReportsService {
     if (!projectId) {
       throw new Error('Se requiere seleccionar un proyecto (actividad) para generar el documento ODS.');
     }
-    const act = await this.db.activity.findUnique({
-      where: { id: projectId },
-      include: { committee: true, volunteers: { include: { volunteer: true } } },
-    });
+    // buildProjectDataFromActivity solo usa campos primitivos de la actividad
+    // (title, description, ods, location, beneficiaries, startDate, endDate) —
+    // no necesita committee ni volunteers embebidos. Skip de includes.
+    const act = await this.fs.findById<ActivityDoc>('activities', projectId);
     if (!act) {
       throw new Error(`No se encontró el proyecto con id "${projectId}".`);
     }
@@ -559,10 +690,23 @@ export class ReportsService {
 
   /** 4. Excel — Balance Financiero (ingresos vs egresos). Filtrable por rango de meses. */
   async balanceFinanciero(period: PeriodFilter = {}): Promise<Buffer> {
-    const [allIncomes, allExpenses] = await Promise.all([
-      this.db.income.findMany({ orderBy: { date: 'desc' } }),
-      this.db.expense.findMany({ include: { activity: true }, orderBy: { date: 'desc' } }),
+    // Cargar ingresos + egresos + actividades en paralelo. El `include: { activity: true }`
+    // de Expense se reconstruye con un map indexado por activityId (evita N+1
+    // porque muchas expenses pueden compartir la misma actividad).
+    const [allIncomes, allExpensesRaw, allActivitiesForMap] = await Promise.all([
+      this.fs.findAll<IncomeDoc>('incomes', {
+        orderBy: { field: 'date', direction: 'desc' },
+      }),
+      this.fs.findAll<ExpenseDoc>('expenses', {
+        orderBy: { field: 'date', direction: 'desc' },
+      }),
+      this.fs.findAll<ActivityDoc>('activities'),
     ]);
+    const activityById = new Map(allActivitiesForMap.map((a) => [a.id, a]));
+    const allExpenses = allExpensesRaw.map((e) => ({
+      ...e,
+      activity: e.activityId ? (activityById.get(e.activityId) ?? null) : null,
+    }));
 
     // Filtrar por rango de meses usando el campo `date`
     const incomes = allIncomes.filter((i) => dateInRange(i.date, period));

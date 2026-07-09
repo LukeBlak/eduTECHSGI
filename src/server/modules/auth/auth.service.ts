@@ -1,53 +1,84 @@
 /**
  * Auth Service — lógica de negocio de autenticación.
  * Equivalente al AuthService de NestJS.
+ *
+ * Migrado de Prisma a Firestore.
  */
 import bcrypt from 'bcryptjs';
 import { inject, Injectable } from '@/server/core/container';
-import { PRISMA_TOKEN } from '@/server/core/prisma.provider';
+import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import { signToken, verifyToken, type AuthPayload } from '@/server/core/jwt.util';
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import type { RegisterInput, LoginInput } from './dto/auth.dto';
 
+/** Tipo del voluntario tal como se almacena en Firestore. */
+interface VolunteerDoc {
+  id: string;
+  name: string;
+  studentId: string;
+  career: string;
+  email: string;
+  phone: string;
+  password: string;
+  role: 'admin' | 'volunteer' | 'committee_leader' | 'president' | 'vice_president';
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Comité embebido para devolver al frontend. */
+interface CommitteeDoc {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class AuthService {
-  private readonly db = inject<typeof import('@prisma/client').PrismaClient>(PRISMA_TOKEN);
+  private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
   private readonly notifications = inject(NotificationsService);
 
   async register(input: RegisterInput) {
-    const existing = await this.db.volunteer.findUnique({
-      where: { studentId: input.studentId },
+    // 1) Verifica carnet único
+    const existing = await this.fs.findOne<VolunteerDoc>('volunteers', {
+      studentId: input.studentId,
     });
     if (existing) {
       return { success: false, message: 'Ya existe un voluntario con este carnet' };
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(input.password, salt);
-
-    // Verifica que el comité exista antes de registrar (defense in depth).
-    const committee = await this.db.committee.findUnique({
-      where: { id: input.committeeId },
-    });
+    // 2) Verifica que el comité exista (defense in depth)
+    const committee = await this.fs.findById<CommitteeDoc>('committees', input.committeeId);
     if (!committee) {
       return { success: false, message: 'El comité seleccionado no existe' };
     }
 
-    const volunteer = await this.db.volunteer.create({
-      data: {
-        name: input.name,
-        studentId: input.studentId,
-        career: input.career,
-        committeeId: input.committeeId,
-        email: input.email || '',
-        phone: input.phone || '',
-        password: hashedPassword,
-        role: 'volunteer',
-      },
-      include: { committee: true },
+    // 3) Hash de password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(input.password, salt);
+
+    // 4) Crea el voluntario
+    const volunteer = await this.fs.create<VolunteerDoc>('volunteers', {
+      name: input.name,
+      studentId: input.studentId,
+      career: input.career,
+      committeeId: input.committeeId,
+      email: input.email || '',
+      phone: input.phone || '',
+      password: hashedPassword,
+      role: 'volunteer',
     });
 
-    const { password, ...userWithoutPassword } = volunteer;
+    // 5) Devuelve sin password + con comité embebido (para compat con frontend)
+    const { password: _pw, ...userWithoutPassword } = volunteer;
+    const userWithCommittee = {
+      ...userWithoutPassword,
+      committee,
+    };
+
     const token = signToken({
       userId: volunteer.id,
       studentId: volunteer.studentId,
@@ -79,15 +110,14 @@ export class AuthService {
     return {
       success: true,
       message: 'Voluntario registrado exitosamente',
-      user: userWithoutPassword,
+      user: userWithCommittee,
       token,
     };
   }
 
   async login(input: LoginInput) {
-    const volunteer = await this.db.volunteer.findUnique({
-      where: { studentId: input.studentId },
-      include: { committee: true },
+    const volunteer = await this.fs.findOne<VolunteerDoc>('volunteers', {
+      studentId: input.studentId,
     });
     if (!volunteer) {
       return { success: false, message: 'Carnet o contraseña incorrectos' };
@@ -98,7 +128,18 @@ export class AuthService {
       return { success: false, message: 'Carnet o contraseña incorrectos' };
     }
 
-    const { password, ...userWithoutPassword } = volunteer;
+    // Lookup del comité (si tiene)
+    let committee: CommitteeDoc | null = null;
+    if (volunteer.committeeId) {
+      committee = await this.fs.findById<CommitteeDoc>('committees', volunteer.committeeId);
+    }
+
+    const { password: _pw, ...userWithoutPassword } = volunteer;
+    const userWithCommittee = {
+      ...userWithoutPassword,
+      committee,
+    };
+
     const token = signToken({
       userId: volunteer.id,
       studentId: volunteer.studentId,
@@ -109,7 +150,7 @@ export class AuthService {
     return {
       success: true,
       message: 'Login exitoso',
-      user: userWithoutPassword,
+      user: userWithCommittee,
       token,
     };
   }
