@@ -11,20 +11,71 @@
  * El singleton se cachea en globalThis para sobrevivir HMR en desarrollo
  * y las cold starts de Vercel serverless.
  *
- * IMPORTANTE: Usamos `require()` (CommonJS) en vez de `import` (ESM) porque
- * firebase-admin es un módulo CommonJS y el bundler de Next.js 16 (Turbopack)
- * pierde la propiedad `admin.credential` al transpilarlo a ESM. `require()`
- * preserva la forma original del módulo y es lo que firebase-admin recomienda
- * oficialmente para entornos serverless.
+ * IMPORTANTE — Estrategia de carga del módulo:
+ * firebase-admin es CommonJS puro. Turbopack (Next.js 16) transforma
+ * `import` y `require` de forma que pierde la propiedad `admin.credential`.
+ * Usamos `eval("require")` que NO puede ser analizado estáticamente por
+ * ningún bundler, garantizando que en runtime se use el `require` real
+ * de Node.js y se cargue el módulo CommonJS nativo.
+ *
+ * Además manejamos el caso donde el bundler envuelve el módulo en `.default`.
  *
  * Errores de inicialización se guardan en `__firebaseInitError` para que
  * los servicios puedan devolver mensajes claros al frontend en vez de 500 genéricos.
  */
 import type { ServiceAccount } from "firebase-admin";
+import type * as FirebaseAdminType from "firebase-admin";
 
-// Carga CommonJS en runtime — bypassa el bundler de Next.js.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const admin = require("firebase-admin") as typeof import("firebase-admin");
+/**
+ * Carga firebase-admin bypassando el bundler.
+ * Intenta múltiples estrategias para máxima compatibilidad.
+ */
+function loadFirebaseAdmin(): typeof FirebaseAdminType {
+  // Estrategia 1: eval('require') — bypassa análisis estático del bundler.
+  // Es la forma más robusta. Ningún bundler puede transformar eval().
+  try {
+    // eslint-disable-next-line no-eval, @typescript-eslint/no-implied-eval
+    const _require = eval("require") as NodeRequire;
+    const mod = _require("firebase-admin") as typeof FirebaseAdminType & {
+      default?: typeof FirebaseAdminType;
+    };
+    // El módulo puede venir envuelto en .default según el bundler.
+    if (mod && (mod as any).credential && typeof (mod as any).credential.cert === "function") {
+      return mod;
+    }
+    if (mod?.default && (mod.default as any).credential) {
+      return mod.default;
+    }
+    return mod;
+  } catch (e) {
+    console.error("[Firebase] eval('require') falló:", e);
+  }
+
+  // Estrategia 2: require directo (fallback — puede ser transformado por bundler)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("firebase-admin") as typeof FirebaseAdminType & {
+      default?: typeof FirebaseAdminType;
+    };
+    if (mod && (mod as any).credential && typeof (mod as any).credential.cert === "function") {
+      return mod;
+    }
+    if (mod?.default && (mod.default as any).credential) {
+      return mod.default;
+    }
+    return mod;
+  } catch (e) {
+    console.error("[Firebase] require directo falló:", e);
+  }
+
+  // Estrategia 3: import dinámico (último recurso)
+  // Esto es async pero como estamos en un contexto síncrono, lanzamos error.
+  throw new Error(
+    "No se pudo cargar firebase-admin. Intenta redeploy sin Build Cache en Vercel.",
+  );
+}
+
+const admin = loadFirebaseAdmin();
 
 const APP_NAME = "edutech-esen";
 
@@ -125,14 +176,15 @@ function ensureInit(): admin.app.App | null {
       app = admin.app(APP_NAME);
     } catch {
       // Guard defensivo: si `admin.credential` es undefined, significa que
-      // firebase-admin se bundleificó incorrectamente (falta serverExternalPackages
-      // en next.config). Da un error claro en vez de "Cannot read properties of undefined".
+      // firebase-admin se bundleificó incorrectamente. Da un error claro
+      // con las keys disponibles para diagnóstico.
       if (!admin.credential || typeof admin.credential.cert !== "function") {
+        const availableKeys = Object.keys(admin).slice(0, 20).join(", ");
         throw new Error(
-          "firebase-admin no se cargó correctamente en el runtime. " +
-            "Esto suele ocurrir cuando Next.js bundleifica el módulo. " +
-            "Verifica que next.config.ts tenga serverExternalPackages: ['firebase-admin']. " +
-            "Si ya lo tiene, reconstruye el deployment en Vercel sin Build Cache.",
+          `firebase-admin se cargó pero admin.credential no está disponible. ` +
+            `Keys encontradas en el módulo: [${availableKeys}]. ` +
+            `Esto indica que el bundler transformó el módulo. ` +
+            `Solución: en Vercel, Redeploy SIN "Use existing Build Cache".`,
         );
       }
       app = admin.initializeApp(
