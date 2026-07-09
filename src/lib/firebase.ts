@@ -11,11 +11,20 @@
  * El singleton se cachea en globalThis para sobrevivir HMR en desarrollo
  * y las cold starts de Vercel serverless.
  *
+ * IMPORTANTE: Usamos `require()` (CommonJS) en vez de `import` (ESM) porque
+ * firebase-admin es un módulo CommonJS y el bundler de Next.js 16 (Turbopack)
+ * pierde la propiedad `admin.credential` al transpilarlo a ESM. `require()`
+ * preserva la forma original del módulo y es lo que firebase-admin recomienda
+ * oficialmente para entornos serverless.
+ *
  * Errores de inicialización se guardan en `__firebaseInitError` para que
  * los servicios puedan devolver mensajes claros al frontend en vez de 500 genéricos.
  */
-import * as admin from "firebase-admin";
 import type { ServiceAccount } from "firebase-admin";
+
+// Carga CommonJS en runtime — bypassa el bundler de Next.js.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const admin = require("firebase-admin") as typeof import("firebase-admin");
 
 const APP_NAME = "edutech-esen";
 
