@@ -175,21 +175,27 @@ function ensureInit(): admin.app.App | null {
     try {
       app = admin.app(APP_NAME);
     } catch {
-      // Guard defensivo: si `admin.credential` es undefined, significa que
-      // firebase-admin se bundleificó incorrectamente. Da un error claro
-      // con las keys disponibles para diagnóstico.
-      if (!admin.credential || typeof admin.credential.cert !== "function") {
-        const availableKeys = Object.keys(admin).slice(0, 20).join(", ");
+      // En firebase-admin v14+, admin.credential.cert() puede estar como
+      // admin.cert() directamente, o admin.credential.cert(), o envuelto en .default.
+      // Probamos las 3 formas.
+      const certFn =
+        (admin as any).credential?.cert ??
+        (admin as any).cert ??
+        (admin as any).default?.credential?.cert ??
+        (admin as any).default?.cert;
+
+      if (typeof certFn !== "function") {
+        const availableKeys = Object.keys(admin).slice(0, 30).join(", ");
         throw new Error(
-          `firebase-admin se cargó pero admin.credential no está disponible. ` +
-            `Keys encontradas en el módulo: [${availableKeys}]. ` +
-            `Esto indica que el bundler transformó el módulo. ` +
-            `Solución: en Vercel, Redeploy SIN "Use existing Build Cache".`,
+          `firebase-admin se cargó pero no se encontró la función cert(). ` +
+            `Keys disponibles: [${availableKeys}]. ` +
+            `Versión de firebase-admin: ${(admin as any).SDK_VERSION ?? "desconocida"}.`,
         );
       }
+
       app = admin.initializeApp(
         {
-          credential: admin.credential.cert(serviceAccount),
+          credential: certFn(serviceAccount),
           databaseURL: process.env.FIREBASE_DATABASE_URL || undefined,
         },
         APP_NAME,
