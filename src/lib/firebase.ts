@@ -14,7 +14,8 @@
  * Errores de inicialización se guardan en `__firebaseInitError` para que
  * los servicios puedan devolver mensajes claros al frontend en vez de 500 genéricos.
  */
-import admin, { type ServiceAccount } from "firebase-admin";
+import * as admin from "firebase-admin";
+import type { ServiceAccount } from "firebase-admin";
 
 const APP_NAME = "edutech-esen";
 
@@ -114,6 +115,17 @@ function ensureInit(): admin.app.App | null {
     try {
       app = admin.app(APP_NAME);
     } catch {
+      // Guard defensivo: si `admin.credential` es undefined, significa que
+      // firebase-admin se bundleificó incorrectamente (falta serverExternalPackages
+      // en next.config). Da un error claro en vez de "Cannot read properties of undefined".
+      if (!admin.credential || typeof admin.credential.cert !== "function") {
+        throw new Error(
+          "firebase-admin no se cargó correctamente en el runtime. " +
+            "Esto suele ocurrir cuando Next.js bundleifica el módulo. " +
+            "Verifica que next.config.ts tenga serverExternalPackages: ['firebase-admin']. " +
+            "Si ya lo tiene, reconstruye el deployment en Vercel sin Build Cache.",
+        );
+      }
       app = admin.initializeApp(
         {
           credential: admin.credential.cert(serviceAccount),
