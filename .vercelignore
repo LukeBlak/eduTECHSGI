@@ -12,6 +12,5 @@ dev.log
 server.log
 dev.pid
 *.pid
-bun.lock
 worklog.md
 README-VERCEL.md

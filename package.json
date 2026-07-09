@@ -2,6 +2,9 @@
   "name": "nextjs_tailwind_shadcn_ts",
   "version": "0.2.0",
   "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "NODE_OPTIONS='--max-old-space-size=4096' next dev -p 3000 2>&1 | tee dev.log",
     "build": "next build",
