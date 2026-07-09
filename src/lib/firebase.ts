@@ -160,14 +160,31 @@ export function getFirestore(): admin.firestore.Firestore | null {
   const app = ensureInit();
   if (!app) return null;
 
-  const g = globalThis as unknown as { __firestore?: admin.firestore.Firestore };
+  const g = globalThis as unknown as {
+    __firestore?: admin.firestore.Firestore;
+    __firebaseInitError?: string;
+  };
   if (g.__firestore) return g.__firestore;
 
-  const fs = app.firestore();
-  // Configuración recomendada para Vercel serverless.
-  fs.settings({ ignoreUndefinedProperties: true });
-  g.__firestore = fs;
-  return fs;
+  try {
+    const fs = app.firestore();
+    // Configuración recomendada para Vercel serverless.
+    // settings() puede lanzar si ya fueron aplicadas (hot reload / cold start reuse).
+    try {
+      fs.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // settings ya aplicadas — ignorar, no es un error real.
+    }
+    g.__firestore = fs;
+    return fs;
+  } catch (e) {
+    // Si app.firestore() falla, registramos el error para diagnóstico.
+    g.__firebaseInitError =
+      "Error al obtener instancia de Firestore: " +
+      (e instanceof Error ? e.message : String(e));
+    console.error("[Firebase] getFirestore error:", g.__firebaseInitError);
+    return null;
+  }
 }
 
 /** Auth de Firebase (si en el futuro migramos de JWT custom a Firebase Auth). */
