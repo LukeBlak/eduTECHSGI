@@ -12,14 +12,14 @@
 import {
   getFirestore,
   getFirebaseInitError,
-  admin,
 } from "@/lib/firebase";
-import type { firestore as firestoreNs } from "firebase-admin";
-
-type Firestore = admin.firestore.Firestore;
-type DocumentData = admin.firestore.DocumentData;
-type WriteBatch = admin.firestore.WriteBatch;
-type WhereFilterOp = firestoreNs.WhereFilterOp;
+import type {
+  Firestore,
+  DocumentData,
+  WriteBatch,
+  Query,
+  WhereFilterOp,
+} from "firebase-admin/firestore";
 
 /**
  * Error claro cuando Firebase no está disponible.
@@ -97,7 +97,7 @@ export async function findAll<T = DocumentData>(
   },
 ): Promise<(T & { id: string })[]> {
   const fs = requireFs();
-  let q: admin.firestore.Query = fs.collection(COLLECTIONS[collection]);
+  let q: Query = fs.collection(COLLECTIONS[collection]);
 
   if (opts?.where) {
     for (const [field, condition] of Object.entries(opts.where)) {
@@ -155,7 +155,7 @@ export async function count(
   where?: WhereClause,
 ): Promise<number> {
   const fs = requireFs();
-  let q: admin.firestore.Query = fs.collection(COLLECTIONS[collection]);
+  let q: Query = fs.collection(COLLECTIONS[collection]);
   if (where) {
     for (const [field, condition] of Object.entries(where)) {
       if (condition && typeof condition === "object" && "op" in (condition as any)) {

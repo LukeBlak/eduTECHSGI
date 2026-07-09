@@ -1,5 +1,5 @@
 /**
- * Firebase Admin SDK — inicialización singleton (robusta para Vercel).
+ * Firebase Admin SDK — inicialización singleton (API modular, robusta para Vercel).
  *
  * Lee las credenciales desde variables de entorno:
  *  - FIREBASE_PROJECT_ID
@@ -8,74 +8,62 @@
  *                           o comillas envolventes; se normaliza todo)
  *  - FIREBASE_DATABASE_URL (opcional)
  *
- * El singleton se cachea en globalThis para sobrevivir HMR en desarrollo
- * y las cold starts de Vercel serverless.
+ * IMPORTANTE — Estrategia de carga modular:
+ * Next.js 16 con Turbopack expone las exports modulares de firebase-admin
+ * (initializeApp, cert, getApp desde 'firebase-admin/app') en vez del
+ * namespace clásico. La API modular NO tiene app.firestore() — hay que
+ * usar getFirestore(app) desde 'firebase-admin/firestore'.
  *
- * IMPORTANTE — Estrategia de carga del módulo:
- * firebase-admin es CommonJS puro. Turbopack (Next.js 16) transforma
- * `import` y `require` de forma que pierde la propiedad `admin.credential`.
- * Usamos `eval("require")` que NO puede ser analizado estáticamente por
- * ningún bundler, garantizando que en runtime se use el `require` real
- * de Node.js y se cargue el módulo CommonJS nativo.
- *
- * Además manejamos el caso donde el bundler envuelve el módulo en `.default`.
+ * Cargamos explícitamente los 2 submódulos con eval('require') para
+ * bypassar el bundler y obtener las exports modulares nativas.
  *
  * Errores de inicialización se guardan en `__firebaseInitError` para que
  * los servicios puedan devolver mensajes claros al frontend en vez de 500 genéricos.
  */
 import type { ServiceAccount } from "firebase-admin";
-import type * as FirebaseAdminType from "firebase-admin";
+import type { App as FirebaseApp, Firestore } from "firebase-admin/app";
 
 /**
- * Carga firebase-admin bypassando el bundler.
- * Intenta múltiples estrategias para máxima compatibilidad.
+ * Carga un submódulo de firebase-admin bypassando el bundler con eval('require').
+ * Ningún bundler puede analizar eval() estáticamente, así que en runtime
+ * se usa el require real de Node.js y se carga el módulo CommonJS nativo.
  */
-function loadFirebaseAdmin(): typeof FirebaseAdminType {
-  // Estrategia 1: eval('require') — bypassa análisis estático del bundler.
-  // Es la forma más robusta. Ningún bundler puede transformar eval().
+function loadModule<T>(moduleName: string): T {
   try {
-    // eslint-disable-next-line no-eval, @typescript-eslint/no-implied-eval
+    // eslint-disable-next-line no-eval
     const _require = eval("require") as NodeRequire;
-    const mod = _require("firebase-admin") as typeof FirebaseAdminType & {
-      default?: typeof FirebaseAdminType;
-    };
-    // El módulo puede venir envuelto en .default según el bundler.
-    if (mod && (mod as any).credential && typeof (mod as any).credential.cert === "function") {
-      return mod;
+    const mod = _require(moduleName);
+    // Manejar envoltorio .default (bundler a veces envuelve)
+    if (mod?.default && !mod.initializeApp && !mod.getFirestore) {
+      return mod.default as T;
     }
-    if (mod?.default && (mod.default as any).credential) {
-      return mod.default;
-    }
-    return mod;
+    return mod as T;
   } catch (e) {
-    console.error("[Firebase] eval('require') falló:", e);
+    console.error(`[Firebase] loadModule(${moduleName}) falló:`, e);
+    throw new Error(`No se pudo cargar el módulo ${moduleName}: ${e}`);
   }
-
-  // Estrategia 2: require directo (fallback — puede ser transformado por bundler)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("firebase-admin") as typeof FirebaseAdminType & {
-      default?: typeof FirebaseAdminType;
-    };
-    if (mod && (mod as any).credential && typeof (mod as any).credential.cert === "function") {
-      return mod;
-    }
-    if (mod?.default && (mod.default as any).credential) {
-      return mod.default;
-    }
-    return mod;
-  } catch (e) {
-    console.error("[Firebase] require directo falló:", e);
-  }
-
-  // Estrategia 3: import dinámico (último recurso)
-  // Esto es async pero como estamos en un contexto síncrono, lanzamos error.
-  throw new Error(
-    "No se pudo cargar firebase-admin. Intenta redeploy sin Build Cache en Vercel.",
-  );
 }
 
-const admin = loadFirebaseAdmin();
+// Cargar los 2 submódulos necesarios con la API modular.
+// Esto se ejecuta una sola vez (al importar este archivo).
+interface AppModule {
+  initializeApp: (
+    config: { credential: unknown; databaseURL?: string },
+    name?: string,
+  ) => FirebaseApp;
+  getApp: (name?: string) => FirebaseApp;
+  getApps: () => FirebaseApp[];
+  cert: (sa: ServiceAccount) => unknown;
+  applicationDefault?: () => unknown;
+  SDK_VERSION?: string;
+}
+interface FirestoreModule {
+  getFirestore: (app?: FirebaseApp) => Firestore;
+  initializeFirestore?: (app: FirebaseApp, settings: unknown) => Firestore;
+}
+
+const appModule = loadModule<AppModule>("firebase-admin/app");
+const firestoreModule = loadModule<FirestoreModule>("firebase-admin/firestore");
 
 const APP_NAME = "edutech-esen";
 
@@ -96,14 +84,11 @@ export function isFirebaseConfigured(): boolean {
  *  2. Con newlines reales (si se pegó con saltos de línea)
  *  3. Envuelta en comillas dobles `"..."` (a veces Vercel las preserva)
  *  4. Con espacios al inicio/final
- *
- * Esta función normaliza todo a un PEM válido que empiece con
- * `-----BEGIN PRIVATE KEY-----` y termine con `-----END PRIVATE KEY-----`.
  */
 function decodePrivateKey(raw: string): string {
   let key = raw.trim();
 
-  // Quitar comillas envolventes si las hay (pueden venir de .env o de Vercel).
+  // Quitar comillas envolventes si las hay.
   if (
     (key.startsWith('"') && key.endsWith('"')) ||
     (key.startsWith("'") && key.endsWith("'"))
@@ -112,7 +97,6 @@ function decodePrivateKey(raw: string): string {
   }
 
   // Convertir `\n` literales a newlines reales.
-  // Si la clave ya tiene newlines reales, replace no hace nada (no hay `\n` literales).
   if (key.includes("\\n")) {
     key = key.replace(/\\n/g, "\n");
   }
@@ -136,9 +120,9 @@ export function getFirebaseInitError(): string | null {
 }
 
 /** Inicializa la app de Firebase Admin (idempotente). */
-function ensureInit(): admin.app.App | null {
+function ensureInit(): FirebaseApp | null {
   const g = globalThis as unknown as {
-    __firebaseApp?: admin.app.App;
+    __firebaseApp?: FirebaseApp;
     __firebaseInitError?: string;
   };
 
@@ -170,32 +154,24 @@ function ensureInit(): admin.app.App | null {
       privateKey,
     };
 
-    // Verifica si ya existe una app con ese nombre (HMR / cold start reuse).
-    let app: admin.app.App;
-    try {
-      app = admin.app(APP_NAME);
-    } catch {
-      // En firebase-admin v14+, admin.credential.cert() puede estar como
-      // admin.cert() directamente, o admin.credential.cert(), o envuelto en .default.
-      // Probamos las 3 formas.
-      const certFn =
-        (admin as any).credential?.cert ??
-        (admin as any).cert ??
-        (admin as any).default?.credential?.cert ??
-        (admin as any).default?.cert;
+    // Verificar que cert() esté disponible (API modular: admin.cert directo).
+    if (typeof appModule.cert !== "function") {
+      throw new Error(
+        `appModule.cert no es función. Keys disponibles: [${Object.keys(appModule).join(", ")}]. ` +
+          `Versión firebase-admin: ${appModule.SDK_VERSION ?? "desconocida"}.`,
+      );
+    }
 
-      if (typeof certFn !== "function") {
-        const availableKeys = Object.keys(admin).slice(0, 30).join(", ");
-        throw new Error(
-          `firebase-admin se cargó pero no se encontró la función cert(). ` +
-            `Keys disponibles: [${availableKeys}]. ` +
-            `Versión de firebase-admin: ${(admin as any).SDK_VERSION ?? "desconocida"}.`,
-        );
-      }
-
-      app = admin.initializeApp(
+    // ¿Ya existe una app con este nombre? (cold start reuse)
+    let app: FirebaseApp;
+    const existingApps = appModule.getApps();
+    const existing = existingApps.find((a) => (a as { name?: string }).name === APP_NAME);
+    if (existing) {
+      app = existing;
+    } else {
+      app = appModule.initializeApp(
         {
-          credential: certFn(serviceAccount),
+          credential: appModule.cert(serviceAccount),
           databaseURL: process.env.FIREBASE_DATABASE_URL || undefined,
         },
         APP_NAME,
@@ -203,7 +179,12 @@ function ensureInit(): admin.app.App | null {
     }
 
     g.__firebaseApp = app;
-    console.log("[Firebase] Inicializado OK — project:", process.env.FIREBASE_PROJECT_ID);
+    console.log(
+      "[Firebase] Inicializado OK — project:",
+      process.env.FIREBASE_PROJECT_ID,
+      "— SDK:",
+      appModule.SDK_VERSION ?? "?",
+    );
     return app;
   } catch (e) {
     g.__firebaseInitError =
@@ -213,30 +194,37 @@ function ensureInit(): admin.app.App | null {
   }
 }
 
-/** Firestore singleton (o null si no está configurado / falló init). */
-export function getFirestore(): admin.firestore.Firestore | null {
+/**
+ * Firestore singleton (o null si no está configurado / falló init).
+ * Usa la API modular: getFirestore(app) desde 'firebase-admin/firestore'.
+ */
+export function getFirestore(): Firestore | null {
   const app = ensureInit();
   if (!app) return null;
 
   const g = globalThis as unknown as {
-    __firestore?: admin.firestore.Firestore;
+    __firestore?: Firestore;
     __firebaseInitError?: string;
   };
   if (g.__firestore) return g.__firestore;
 
   try {
-    const fs = app.firestore();
+    // API modular: getFirestore(app) en vez de app.firestore()
+    if (typeof firestoreModule.getFirestore !== "function") {
+      throw new Error(
+        `firestoreModule.getFirestore no es función. Keys: [${Object.keys(firestoreModule).join(", ")}].`,
+      );
+    }
+    const fs = firestoreModule.getFirestore(app);
     // Configuración recomendada para Vercel serverless.
-    // settings() puede lanzar si ya fueron aplicadas (hot reload / cold start reuse).
     try {
-      fs.settings({ ignoreUndefinedProperties: true });
+      fs.settings({ ignoreUndefinedProperties: true } as never);
     } catch {
-      // settings ya aplicadas — ignorar, no es un error real.
+      // settings ya aplicadas — ignorar.
     }
     g.__firestore = fs;
     return fs;
   } catch (e) {
-    // Si app.firestore() falla, registramos el error para diagnóstico.
     g.__firebaseInitError =
       "Error al obtener instancia de Firestore: " +
       (e instanceof Error ? e.message : String(e));
@@ -245,11 +233,30 @@ export function getFirestore(): admin.firestore.Firestore | null {
   }
 }
 
-/** Auth de Firebase (si en el futuro migramos de JWT custom a Firebase Auth). */
-export function getAuth(): admin.auth.Auth | null {
+/**
+ * Auth de Firebase (si en el futuro migramos de JWT custom a Firebase Auth).
+ * Usa la API modular: getAuth(app) desde 'firebase-admin/auth'.
+ */
+export function getAuth(): unknown | null {
   const app = ensureInit();
-  return app ? app.auth() : null;
+  if (!app) return null;
+  try {
+    const authModule = loadModule<{ getAuth: (app: FirebaseApp) => unknown }>(
+      "firebase-admin/auth",
+    );
+    return authModule.getAuth(app);
+  } catch (e) {
+    console.error("[Firebase] getAuth error:", e);
+    return null;
+  }
 }
 
-export { admin };
+// Re-export para compatibilidad con código existente que importa `admin`.
+// Pero los servicios deberían usar getFirestore() directamente.
+export const admin = {
+  ...appModule,
+  ...firestoreModule,
+  firestore: () => getFirestore(),
+  app: () => ensureInit(),
+};
 export type { ServiceAccount };
