@@ -1,0 +1,17 @@
+# Excluido del deploy a Vercel (sigue en el repo para desarrollo local)
+mini-services/
+db/
+upload/
+download/
+tool-results/
+agent-ctx/
+Caddyfile
+start-all.sh
+start-dev.sh
+dev.log
+server.log
+dev.pid
+*.pid
+bun.lock
+worklog.md
+README-VERCEL.md

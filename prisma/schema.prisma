@@ -1,0 +1,393 @@
+// Prisma schema — EduTECH ESEN · Gestión de Voluntarios y Horas Sociales
+// SQLite (sandbox). Enums soportados (mapeados a TEXT). No scalar lists → tablas de unión.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Rol del voluntario dentro de la asociación.
+/// - volunteer: voluntario base (sin acceso a finanzas)
+/// - committee_leader: líder de comité (acceso completo + aprueba horas)
+/// - president: presidente (acceso completo + aprueba horas)
+/// - vice_president: vicepresidente (acceso completo + aprueba horas)
+/// - admin: backward-compat (acceso completo)
+enum Role {
+  admin
+  volunteer
+  committee_leader
+  president
+  vice_president
+}
+
+/// Tipo de hora social registrada
+enum HourType {
+  admin
+  field
+}
+
+/// Estado de una actividad o clase.
+/// - active: vigente, sigue abierta (puede recibir inscripciones)
+/// - completed: ya finalizada; al marcarla se asignaron automáticamente
+///   las horas a los inscritos/instructores.
+enum ActivityStatus {
+  active
+  completed
+}
+
+/// Estado de aprobación de una hora social
+/// - pending: pendiente de aprobación (creada por voluntario)
+/// - approved: aprobada por líder/presidente/vice/admin
+/// - rejected: rechazada
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+/// Estado de una solicitud de horas adicionales hecha por un voluntario
+enum HourRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+/// Rol de un voluntario dentro de una clase impartida
+enum ClassRole {
+  instructor
+  assistant
+}
+
+/// Estado de la inscripción de un voluntario en una actividad
+/// - registered: inscrito dentro del cupo
+/// - waitlist: en lista de espera (cuando el cupo está lleno)
+/// - cancelled: canceló su inscripción
+enum SubscriptionStatus {
+  registered
+  waitlist
+  cancelled
+}
+
+model Volunteer {
+  id         String   @id @default(cuid())
+  name       String
+  studentId  String   @unique /// Carnet de 8 dígitos
+  career     String   @default("")
+  email      String   @default("")
+  phone      String   @default("")
+  password   String
+  role       Role     @default(volunteer)
+  committeeId String?
+  committee  Committee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+
+  activityLinks  ActivityVolunteer[]
+  classLinks     ClassVolunteer[]
+  socialHours    SocialHour[]
+  hourRequests   HourRequest[]
+  reviewedHours  SocialHour[] @relation("ReviewedHours")
+  reviewedRequests HourRequest[] @relation("ReviewedRequests")
+  notifications  Notification[]
+  achievements   VolunteerAchievement[]
+  grantedAchievements VolunteerAchievement[] @relation("GrantedAchievements")
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([committeeId])
+  @@index([role])
+}
+
+/// Notificaciones in-app dirigidas a un voluntario específico.
+/// Se generan por eventos del sistema (nueva hora social, actividad, ingreso, etc.)
+/// y opcionalmente se envían también por email cuando el voluntario tiene email válido.
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   /// destinatario (Volunteer.id)
+  user      Volunteer @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   /// "social_hour" | "activity" | "income" | "expense" | "volunteer" | "system" | "hour_request" | "class"
+  title     String
+  message   String   @default("")
+  link      String   @default("") /// ruta/anchor opcional para navegar al hacer click
+  read      Boolean  @default(false)
+  emailed   Boolean  @default(false) /// true si se envió por email (o se intentó)
+  metadata  String   @default("") /// JSON string con datos extra (amount, hours, etc.)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@index([type])
+}
+
+model Committee {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("")
+  color       String   @default("emerald") /// color de acento en la UI
+  members     Volunteer[]
+  activities  Activity[]
+  classes     Class[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Activity {
+  id               String   @id @default(cuid())
+  title            String
+  description      String   @default("")
+  objectives       String   @default("") /// objetivos específicos del proyecto (para Memoria de Labores)
+  impact           String   @default("") /// impacto esperado/obtenido (para Memoria de Labores)
+  type             String   @default("EduTECH ESEN") /// tipo de proyecto
+  startDate        String   @default("") /// ISO date o texto libre
+  endDate          String   @default("")
+  location         String   @default("")
+  hours            Float    @default(0)
+  hourType         HourType @default(field) /// tipo de horas que se asignan al finalizar (admin=administrativas, field=de campo)
+  capacity         Int?     /// cupo máximo de participantes (null = ilimitado)
+  status           ActivityStatus @default(active) /// active | completed
+  completedAt      DateTime? /// fecha en la que se marcó como completada
+  beneficiariesMen Int      @default(0)
+  beneficiariesWomen Int    @default(0)
+  ods              String   @default("") /// separado por comas: "ODS 4, ODS 10"
+  committeeId      String?
+  committee        Committee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+
+  volunteers       ActivityVolunteer[]
+  socialHours      SocialHour[]
+  expenses         Expense[]
+  hourRequests     HourRequest[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([committeeId])
+  @@index([status])
+}
+
+/// Tabla de unión Actividad ↔ Voluntario (participantes inscritos)
+model ActivityVolunteer {
+  id          String             @id @default(cuid())
+  activityId  String
+  volunteerId String
+  status      SubscriptionStatus @default(registered)
+  activity    Activity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  volunteer   Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([activityId, volunteerId])
+  @@index([volunteerId])
+  @@index([status])
+}
+
+model SocialHour {
+  id              String         @id @default(cuid())
+  volunteerId     String
+  activityId      String?
+  hours           Float          @default(0)
+  type            HourType       @default(field)
+  date            String         @default("") /// fecha del registro
+  notes           String         @default("")
+  approvalStatus  ApprovalStatus @default(approved) /// horas creadas por líderes/presidente/vice/admin son aprobadas directamente; las que crea un voluntario quedan pending
+  reviewerId      String? /// voluntario que aprobó/rechazó (líder/presidente/vice/admin)
+  reviewer        Volunteer?     @relation("ReviewedHours", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  rejectionReason String         @default("")
+  volunteer       Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  activity        Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([volunteerId])
+  @@index([activityId])
+  @@index([approvalStatus])
+}
+
+/// Solicitud de horas adicionales hecha por un voluntario que participó en una actividad
+/// y considera que realizó más horas de las aprobadas inicialmente.
+model HourRequest {
+  id              String            @id @default(cuid())
+  volunteerId     String
+  activityId      String?
+  currentHours    Float             @default(0) /// horas ya registradas/aprobadas
+  requestedHours  Float             @default(0) /// horas adicionales solicitadas
+  approvedHours   Float? /// horas finalmente aprobadas (si aplica)
+  reason          String            @default("")
+  status          HourRequestStatus @default(pending)
+  reviewerId      String? /// líder/presidente/vice/admin que revisa
+  reviewer        Volunteer?        @relation("ReviewedRequests", fields: [reviewerId], references: [id], onDelete: SetNull)
+  reviewNotes     String            @default("")
+  reviewedAt      DateTime?
+
+  volunteer       Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  activity        Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([volunteerId])
+  @@index([status])
+  @@index([activityId])
+}
+
+model Class {
+  id            String   @id @default(cuid())
+  title         String
+  date          String   @default("")
+  durationHours Float    @default(1)
+  school        String   @default("")
+  topic         String   @default("")
+  description   String   @default("")
+  status        ActivityStatus @default(active) /// active | completed
+  completedAt   DateTime? /// fecha en la que se marcó como completada
+  committeeId   String?
+  committee     Committee? @relation(fields: [committeeId], references: [id], onDelete: SetNull)
+
+  instructors   ClassVolunteer[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([committeeId])
+  @@index([status])
+}
+
+/// Tabla de unión Clase ↔ Voluntario (instructores/asistentes)
+model ClassVolunteer {
+  id        String   @id @default(cuid())
+  classId   String
+  volunteerId String
+  role      ClassRole @default(instructor)
+  class     Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  volunteer Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([classId, volunteerId])
+  @@index([volunteerId])
+}
+
+/// Ingresos de la asociación (gestión financiera)
+model Income {
+  id        String   @id @default(cuid())
+  date      String   @default("")
+  concept   String
+  amount    Float    @default(0)
+  source    String   @default("") /// origen: cuota, donación, evento, etc.
+  category  String   @default("general")
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+  @@index([date])
+}
+
+/// Egresos / gastos de la asociación (gestión financiera completa)
+model Expense {
+  id         String   @id @default(cuid())
+  date       String   @default("")
+  concept    String
+  amount     Float    @default(0)
+  category   String   @default("general") /// transporte, materiales, eventos, etc.
+  paymentMethod String @default("efectivo") /// efectivo, transferencia, tarjeta
+  beneficiary String @default("") /// proveedor o beneficiario del pago
+  notes      String   @default("")
+  activityId String?  /// gasto asociado a una actividad (opcional)
+  activity   Activity? @relation(fields: [activityId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([category])
+  @@index([date])
+  @@index([activityId])
+}
+
+/// Nivel/rango de un logro. Determina su rareza y color.
+enum AchievementTier {
+  bronze
+  silver
+  gold
+  platinum
+}
+
+/// Tipo de criterio automático que evalúa el sistema sin intervención manual.
+/// - hours_total:        total de horas sociales aprobadas >= threshold
+/// - field_hours:        horas de campo aprobadas >= threshold
+/// - admin_hours:        horas administrativas aprobadas >= threshold
+/// - activities_count:   número de actividades en que participó (status=completed) >= threshold
+/// - classes_count:      número de clases impartidas (status=completed) >= threshold
+/// - social_records:     número de registros de horas sociales aprobados >= threshold
+/// - first_activity:     umbral=1 → primera actividad completada
+/// - hours_milestone_50: hito de 50 horas sociales aprobadas
+/// - hours_milestone_100: hito de 100 horas sociales aprobadas
+/// - none:               logro puramente manual (el presidente lo otorga cuando quiera)
+enum AutoCriteriaType {
+  none
+  hours_total
+  field_hours
+  admin_hours
+  activities_count
+  classes_count
+  social_records
+  first_activity
+  hours_milestone_50
+  hours_milestone_100
+}
+
+/// Definición de un logro/badge gestionado por el presidente.
+/// Puede ser automático (auto=true) — el sistema lo evalúa y otorga solo —
+/// o manual (auto=false) — el presidente lo otorga/revoca explícitamente.
+model Achievement {
+  id          String             @id @default(cuid())
+  name        String
+  description String             @default("")
+  /// Emoji o nombre de icono Lucide (ej. "Trophy", "🎯"). Si está vacío se usa un icono por defecto según tier.
+  icon        String             @default("Trophy")
+  /// Color de acento (tailwind name): emerald, gold, sky, violet, rose, graphite.
+  color       String             @default("emerald")
+  tier        AchievementTier    @default(bronze)
+  points      Int                @default(0) /// puntos que aporta a la "puntuación de logros" del voluntario
+  auto        Boolean            @default(false) /// si true, el sistema lo otorga automáticamente según autoType+threshold
+  autoType    AutoCriteriaType   @default(none)
+  autoThreshold Float            @default(0) /// umbral numérico del criterio automático
+  active      Boolean            @default(true) /// logros inactivos no se muestran ni se evalúan
+  /// Indica si este logro se puede ganar múltiples veces (no implementado en V1; reservado para futuro).
+  repeatable  Boolean            @default(false)
+
+  volunteers  VolunteerAchievement[]
+
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([active])
+  @@index([auto])
+  @@index([tier])
+}
+
+/// Tabla de unión Voluntario ↔ Logro (registra cuándo se ganó cada logro).
+/// Una fila existe solo cuando el voluntario tiene el logro otorgado.
+model VolunteerAchievement {
+  id            String      @id @default(cuid())
+  volunteerId   String
+  achievementId String
+  /// Si fue otorgado automáticamente por el sistema (true) o manualmente por un líder/presidente (false).
+  automatic     Boolean     @default(false)
+  /// Voluntario que otorgó el logro manualmente (null si fue automático).
+  grantedById   String?
+  grantedBy     Volunteer?  @relation("GrantedAchievements", fields: [grantedById], references: [id], onDelete: SetNull)
+  notes         String      @default("") /// nota opcional del otorgante
+  volunteer     Volunteer   @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+
+  createdAt     DateTime    @default(now()) /// fecha en la que se ganó el logro
+
+  @@unique([volunteerId, achievementId])
+  @@index([volunteerId])
+  @@index([achievementId])
+  @@index([automatic])
+}

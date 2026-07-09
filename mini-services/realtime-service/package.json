@@ -1,0 +1,13 @@
+{
+  "name": "edutech-realtime-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EduTECH ESEN — WebSocket realtime service. Recibe eventos del backend Next.js por HTTP y los difunde a todos los clientes conectados por socket.io.",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "bun index.ts"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5"
+  }
+}

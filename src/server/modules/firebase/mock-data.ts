@@ -1,0 +1,168 @@
+/**
+ * Mock data que simula la estructura de un Firestore de EduTECH ESEN.
+ *
+ * Se usa cuando no hay credenciales reales configuradas (modo "mock") para
+ * demostrar el flujo completo de sincronización. Representa cómo se verían
+ * los documentos en las colecciones de Firestore.
+ *
+ * Este dataset incluye comités, voluntarios, actividades, horas sociales,
+ * ingresos y egresos representativos de la asociación.
+ */
+export const MOCK_FIREBASE_DATA = {
+  committees: [
+    {
+      id: 'mock-com-1',
+      name: 'Dirección Ejecutiva',
+      description: 'Comité encargado de la gestión estratégica y administrativa de EduTECH ESEN.',
+      color: 'emerald',
+    },
+    {
+      id: 'mock-com-2',
+      name: 'Comité de Tecnología',
+      description: 'Desarrollo de plataformas, mantenimiento de equipos y soporte técnico en escuelas.',
+      color: 'cyan',
+    },
+    {
+      id: 'mock-com-3',
+      name: 'Comité de Capacitación',
+      description: 'Diseño y ejecución de talleres de educación digital para estudiantes y docentes.',
+      color: 'sky',
+    },
+    {
+      id: 'mock-com-4',
+      name: 'Comité de Logística',
+      description: 'Coordinación de traslados, materiales y eventos presenciales.',
+      color: 'graphite',
+    },
+    {
+      id: 'mock-com-5',
+      name: 'Comité de Vinculaciones',
+      description: 'Relaciones con escuelas, empresas y entidades aliadas.',
+      color: 'violet',
+    },
+  ],
+
+  volunteers: [
+    { id: 'mock-v-1', name: 'Alejandro Ramírez', studentId: '00010001', career: 'Ingeniería de Software y Negocios Digitales (ISND)', email: 'alejandro.ramirez@esen.edu.sv', phone: '7000-0001', role: 'admin', committee: 'Dirección Ejecutiva', password: '00000000' },
+    { id: 'mock-v-2', name: 'Valeria Martínez', studentId: '00010002', career: 'Ingeniería de Negocios (IDN)', email: 'valeria.martinez@esen.edu.sv', phone: '7000-0002', role: 'volunteer', committee: 'Comité de Capacitación', password: '00000000' },
+    { id: 'mock-v-3', name: 'Rodrigo Hernández', studentId: '00010003', career: 'Ingeniería de Software y Negocios Digitales (ISND)', email: 'rodrigo.hernandez@esen.edu.sv', phone: '7000-0003', role: 'volunteer', committee: 'Comité de Tecnología', password: '00000000' },
+    { id: 'mock-v-4', name: 'Gabriela López', studentId: '00010004', career: 'Licenciatura de Economía y Negocios (LEN)', email: 'gabriela.lopez@esen.edu.sv', phone: '7000-0004', role: 'volunteer', committee: 'Comité de Logística', password: '00000000' },
+    { id: 'mock-v-5', name: 'Diego Castro', studentId: '00010005', career: 'Licenciatura de Ciencias Jurídicas (LCJ)', email: 'diego.castro@esen.edu.sv', phone: '7000-0005', role: 'volunteer', committee: 'Comité de Vinculaciones', password: '00000000' },
+    { id: 'mock-v-6', name: 'Fernanda Vega', studentId: '00010006', career: 'Ingeniería de Negocios (IDN)', email: 'fernanda.vega@esen.edu.sv', phone: '7000-0006', role: 'volunteer', committee: 'Comité de Capacitación', password: '00000000' },
+    { id: 'mock-v-7', name: 'Andrés Mendoza', studentId: '00010007', career: 'Ingeniería de Software y Negocios Digitales (ISND)', email: 'andres.mendoza@esen.edu.sv', phone: '7000-0007', role: 'volunteer', committee: 'Comité de Tecnología', password: '00000000' },
+    { id: 'mock-v-8', name: 'Mariana Pineda', studentId: '00010008', career: 'Ingeniería de Negocios (IDN)', email: 'mariana.pineda@esen.edu.sv', phone: '7000-0008', role: 'volunteer', committee: 'Dirección Ejecutiva', password: '00000000' },
+  ],
+
+  activities: [
+    {
+      id: 'mock-act-1',
+      title: 'Taller de Introducción a la Programación — Escuela España',
+      description: 'Sesiones semanales de Scratch y Python para estudiantes de 7° a 9° grado.',
+      type: 'EduTECH ESEN',
+      startDate: '2025-02-15',
+      endDate: '2025-06-30',
+      location: 'Centro Escolar España, Santa Tecla',
+      hours: 40,
+      beneficiariesMen: 18,
+      beneficiariesWomen: 22,
+      ods: ['ODS 4', 'ODS 10'],
+      committee: 'Comité de Capacitación',
+      volunteers: ['00010002', '00010006'],
+    },
+    {
+      id: 'mock-act-2',
+      title: 'Instalación de Laboratorio de Cómputo — Escuela Cascajal',
+      description: 'Configuración de 15 computadoras donadas e instalación de software educativo.',
+      type: 'EduTECH ESEN',
+      startDate: '2025-03-10',
+      endDate: '2025-03-12',
+      location: 'Centro Escolar Cascajal, La Libertad',
+      hours: 24,
+      beneficiariesMen: 120,
+      beneficiariesWomen: 135,
+      ods: ['ODS 4', 'ODS 9'],
+      committee: 'Comité de Tecnología',
+      volunteers: ['00010003', '00010007'],
+    },
+    {
+      id: 'mock-act-3',
+      title: 'Capacitación Docente en Herramientas Digitales',
+      description: 'Formación a 25 docentes en uso de Google Workspace y plataformas LMS.',
+      type: 'EduTECH ESEN',
+      startDate: '2025-04-05',
+      endDate: '2025-04-06',
+      location: 'ESEN, Antiguo Cuscatlán',
+      hours: 16,
+      beneficiariesMen: 8,
+      beneficiariesWomen: 17,
+      ods: ['ODS 4'],
+      committee: 'Comité de Capacitación',
+      volunteers: ['00010002', '00010006', '00010004'],
+    },
+    {
+      id: 'mock-act-4',
+      title: 'Campaña de Recaudación de Equipos — Alianza TechCorp',
+      description: 'Coordinación de donación de 30 equipos reacondicionados con empresa aliada.',
+      type: 'EduTECH ESEN',
+      startDate: '2025-05-01',
+      endDate: '2025-05-20',
+      location: 'San Salvador',
+      hours: 30,
+      beneficiariesMen: 0,
+      beneficiariesWomen: 0,
+      ods: ['ODS 17', 'ODS 9'],
+      committee: 'Comité de Vinculaciones',
+      volunteers: ['00010005'],
+    },
+    {
+      id: 'mock-act-5',
+      title: 'Festival de Robótica Educativa',
+      description: 'Evento de cierre con exposición de proyectos de robótica de estudiantes beneficiarios.',
+      type: 'EduTECH ESEN',
+      startDate: '2025-06-15',
+      endDate: '2025-06-15',
+      location: 'ESEN, Antiguo Cuscatlán',
+      hours: 8,
+      beneficiariesMen: 45,
+      beneficiariesWomen: 50,
+      ods: ['ODS 4', 'ODS 5'],
+      committee: 'Comité de Logística',
+      volunteers: ['00010004', '00010002', '00010003'],
+    },
+  ],
+
+  socialHours: [
+    { studentId: '00010002', activityTitle: 'Taller de Introducción a la Programación — Escuela España', hours: 40, type: 'field', date: '2025-06-30', notes: 'Instructora principal del taller' },
+    { studentId: '00010006', activityTitle: 'Taller de Introducción a la Programación — Escuela España', hours: 40, type: 'field', date: '2025-06-30', notes: 'Asistente del taller' },
+    { studentId: '00010003', activityTitle: 'Instalación de Laboratorio de Cómputo — Escuela Cascajal', hours: 24, type: 'field', date: '2025-03-12', notes: 'Configuración de equipos' },
+    { studentId: '00010007', activityTitle: 'Instalación de Laboratorio de Cómputo — Escuela Cascajal', hours: 24, type: 'field', date: '2025-03-12', notes: 'Instalación de software' },
+    { studentId: '00010002', activityTitle: 'Capacitación Docente en Herramientas Digitales', hours: 16, type: 'field', date: '2025-04-06', notes: 'Facilitadora' },
+    { studentId: '00010004', activityTitle: 'Capacitación Docente en Herramientas Digitales', hours: 16, type: 'field', date: '2025-04-06', notes: 'Logística del evento' },
+    { studentId: '00010005', activityTitle: 'Campaña de Recaudación de Equipos — Alianza TechCorp', hours: 30, type: 'admin', date: '2025-05-20', notes: 'Gestión de alianza' },
+    { studentId: '00010001', hours: 20, type: 'admin', date: '2025-06-01', notes: 'Coordinación general semestral' },
+    { studentId: '00010008', hours: 12, type: 'admin', date: '2025-05-15', notes: 'Apoyo administrativo' },
+    { studentId: '00010004', activityTitle: 'Festival de Robótica Educativa', hours: 8, type: 'field', date: '2025-06-15', notes: 'Coordinación logística' },
+  ],
+
+  incomes: [
+    { date: '2025-01-15', concept: 'Cuotas de miembros — Semestre 1', amount: 1200, source: 'cuotas', category: 'cuotas', notes: '30 miembros × $40' },
+    { date: '2025-02-20', concept: 'Donación TechCorp S.A.', amount: 5000, source: 'donación', category: 'donaciones', notes: 'Para compra de equipos' },
+    { date: '2025-03-10', concept: 'Sponsorship evento de lanzamiento', amount: 1500, source: 'evento', category: 'eventos', notes: '' },
+    { date: '2025-04-05', concept: 'Venta de merchandising', amount: 350, source: 'venta', category: 'ventas', notes: 'Camisetas y stickers' },
+    { date: '2025-05-01', concept: 'Donación anónima', amount: 800, source: 'donación', category: 'donaciones', notes: '' },
+    { date: '2025-06-15', concept: 'Inscripción Festival de Robótica', amount: 600, source: 'evento', category: 'eventos', notes: '40 inscripciones × $15' },
+    { date: '2025-06-30', concept: 'Cuotas de miembros — Semestre 2', amount: 1400, source: 'cuotas', category: 'cuotas', notes: '35 miembros × $40' },
+  ],
+
+  expenses: [
+    { date: '2025-02-01', concept: 'Compra de 15 computadoras reacondicionadas', amount: 2250, category: 'materiales', paymentMethod: 'transferencia', beneficiary: 'TechRefurb SV', notes: 'Lab Escuela Cascajal' },
+    { date: '2025-02-15', concept: 'Licencias de software educativo', amount: 320, category: 'materiales', paymentMethod: 'tarjeta', beneficiary: 'EduSoftware Inc.', notes: '' },
+    { date: '2025-03-05', concept: 'Transporte a Escuela España', amount: 85, category: 'transporte', paymentMethod: 'efectivo', beneficiary: 'Bus rental', notes: '4 sesiones' },
+    { date: '2025-03-12', concept: 'Alimentación voluntarios instalación lab', amount: 120, category: 'alimentación', paymentMethod: 'efectivo', beneficiary: 'Local catering', notes: '' },
+    { date: '2025-04-06', concept: 'Impresión de materiales de capacitación', amount: 95, category: 'materiales', paymentMethod: 'efectivo', beneficiary: 'PrintCenter', notes: '' },
+    { date: '2025-05-10', concept: 'Reparación de 5 computadoras', amount: 280, category: 'materiales', paymentMethod: 'transferencia', beneficiary: 'PCRepair SV', notes: '' },
+    { date: '2025-06-15', concept: 'Montaje y sonido Festival de Robótica', amount: 450, category: 'eventos', paymentMethod: 'transferencia', beneficiary: 'EventProd', notes: '' },
+    { date: '2025-06-15', concept: 'Refrigerios Festival de Robótica', amount: 180, category: 'alimentación', paymentMethod: 'efectivo', beneficiary: 'SnackShop', notes: '95 asistentes' },
+    { date: '2025-06-20', concept: 'Compra de kits de robótica', amount: 750, category: 'materiales', paymentMethod: 'tarjeta', beneficiary: 'RobotEdu', notes: '5 kits' },
+  ],
+};

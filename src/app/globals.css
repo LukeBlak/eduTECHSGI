@@ -1,0 +1,302 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  /* Graphite scale — gris azulado basado en #6d747c */
+  --color-graphite-50: #f4f5f6;
+  --color-graphite-100: #e5e7e9;
+  --color-graphite-200: #cecfd3;
+  --color-graphite-300: #adb1b7;
+  --color-graphite-400: #8a9099;
+  --color-graphite-500: #6d747c;
+  --color-graphite-600: #595f66;
+  --color-graphite-700: #484d53;
+  --color-graphite-800: #3d4146;
+  --color-graphite-900: #36393e;
+  --color-graphite-950: #1f2125;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ============================================================
+   EduTECH ESEN — Paleta oficial (Aqua / Turquesa)
+   FONDO: Aqua en modo claro, Aqua oscuro en modo oscuro
+   #10616D Caribbean Current  → primary (turquesa oscuro)
+   #00B0B7 Verdigris          → secondary / acento medio
+   #5FEAFF Electric Blue      → highlight / acento claro
+   #6D747C Graphite           → acento neutro (gris azulado)
+   #EAE7E8 Platinum           → muted / fondo neutro
+   #FFFFFF White              → cards / superficies
+   ============================================================ */
+
+:root {
+  --radius: 0.625rem;
+  /* Fondo Aqua (light) — cian/agua suave pero claramente aqua */
+  --background: oklch(0.955 0.038 195);
+  --foreground: oklch(0.20 0.045 195);
+  /* Cards blancos con un micro-tinte aqua para integrar con el fondo */
+  --card: oklch(0.992 0.008 195);
+  --card-foreground: oklch(0.20 0.045 195);
+  --popover: oklch(0.995 0.006 195);
+  --popover-foreground: oklch(0.20 0.045 195);
+  /* #10616D Caribbean Current */
+  --primary: oklch(0.447 0.085 195);
+  --primary-foreground: oklch(0.99 0.01 195);
+  /* #00B0B7 Verdigris (superficie aqua media) */
+  --secondary: oklch(0.91 0.042 195);
+  --secondary-foreground: oklch(0.28 0.07 195);
+  /* Aqua-tinted muted */
+  --muted: oklch(0.925 0.032 195);
+  --muted-foreground: oklch(0.42 0.038 195);
+  --accent: oklch(0.895 0.055 195);
+  --accent-foreground: oklch(0.28 0.07 195);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.855 0.032 195);
+  --input: oklch(0.875 0.038 195);
+  --ring: oklch(0.447 0.085 195);
+  /* Chart palette basada en la paleta oficial */
+  --chart-1: oklch(0.447 0.085 195);   /* #10616D Caribbean Current */
+  --chart-2: oklch(0.684 0.105 195);   /* #00B0B7 Verdigris */
+  --chart-3: oklch(0.875 0.098 198);   /* #5FEAFF Electric Blue */
+  --chart-4: oklch(0.55 0.012 245);   /* #6d747c Graphite */
+  --chart-5: oklch(0.6 0.13 160);      /* verde complementary accent */
+  /* Sidebar aqua ligeramente más saturada que el fondo para diferenciarse */
+  --sidebar: oklch(0.935 0.045 195);
+  --sidebar-foreground: oklch(0.22 0.045 195);
+  --sidebar-primary: oklch(0.447 0.085 195);
+  --sidebar-primary-foreground: oklch(0.99 0.01 195);
+  --sidebar-accent: oklch(0.895 0.055 195);
+  --sidebar-accent-foreground: oklch(0.28 0.07 195);
+  --sidebar-border: oklch(0.855 0.035 195);
+  --sidebar-ring: oklch(0.447 0.085 195);
+}
+
+.dark {
+  /* Fondo Aqua oscuro (dark) — teal/aqua profundo */
+  --background: oklch(0.185 0.045 195);
+  --foreground: oklch(0.96 0.022 195);
+  /* Cards aqua oscuro un poco más claro que el fondo */
+  --card: oklch(0.232 0.05 195);
+  --card-foreground: oklch(0.96 0.022 195);
+  --popover: oklch(0.232 0.05 195);
+  --popover-foreground: oklch(0.96 0.022 195);
+  /* #00B0B7 Verdigris aclarado para dark mode */
+  --primary: oklch(0.684 0.105 195);
+  --primary-foreground: oklch(0.155 0.04 195);
+  --secondary: oklch(0.285 0.052 195);
+  --secondary-foreground: oklch(0.96 0.022 195);
+  --muted: oklch(0.265 0.045 195);
+  --muted-foreground: oklch(0.72 0.035 195);
+  --accent: oklch(0.305 0.062 195);
+  --accent-foreground: oklch(0.95 0.022 195);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(0.45 0.06 195 / 25%);
+  --input: oklch(0.45 0.06 195 / 32%);
+  --ring: oklch(0.684 0.105 195);
+  --chart-1: oklch(0.684 0.105 195);   /* #00B0B7 */
+  --chart-2: oklch(0.875 0.098 198);   /* #5FEAFF */
+  --chart-3: oklch(0.55 0.09 195);     /* Caribbean aclarado */
+  --chart-4: oklch(0.55 0.012 245);
+  --chart-5: oklch(0.7 0.13 160);
+  /* Sidebar aqua oscuro un poco más profundo que el fondo */
+  --sidebar: oklch(0.165 0.04 195);
+  --sidebar-foreground: oklch(0.96 0.022 195);
+  --sidebar-primary: oklch(0.684 0.105 195);
+  --sidebar-primary-foreground: oklch(0.155 0.04 195);
+  --sidebar-accent: oklch(0.285 0.055 195);
+  --sidebar-accent-foreground: oklch(0.95 0.022 195);
+  --sidebar-border: oklch(0.45 0.06 195 / 22%);
+  --sidebar-ring: oklch(0.684 0.105 195);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* Aqua glow: degradado sutil que da profundidad al fondo aqua */
+    background-image:
+      radial-gradient(ellipse 70% 50% at 50% -10%, oklch(0.985 0.05 195 / 0.55), transparent 65%),
+      radial-gradient(ellipse 55% 45% at 100% 105%, oklch(0.96 0.06 198 / 0.40), transparent 60%),
+      radial-gradient(ellipse 50% 40% at 0% 80%, oklch(0.97 0.045 200 / 0.30), transparent 55%);
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+  }
+  .dark body {
+    background-image:
+      radial-gradient(ellipse 70% 50% at 50% -10%, oklch(0.26 0.08 195 / 0.65), transparent 65%),
+      radial-gradient(ellipse 55% 45% at 100% 105%, oklch(0.24 0.07 198 / 0.45), transparent 60%),
+      radial-gradient(ellipse 50% 40% at 0% 80%, oklch(0.22 0.06 200 / 0.35), transparent 55%);
+  }
+}
+
+/* Custom scrollbar — turquesa */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: oklch(0.684 0.105 195 / 0.5);
+  border-radius: 9999px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.447 0.085 195 / 0.7);
+}
+.dark .scroll-thin::-webkit-scrollbar-thumb {
+  background: oklch(0.684 0.105 195 / 0.4);
+}
+
+/* ============================ */
+/* Print styles for PDF export  */
+/* ============================ */
+@media print {
+  /* Force light theme colors for printing */
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.15 0.03 195);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.15 0.03 195);
+    --muted: oklch(0.96 0.005 320);
+    --muted-foreground: oklch(0.35 0.02 195);
+    --border: oklch(0.85 0.01 195);
+    --primary: oklch(0.447 0.085 195);
+    --primary-foreground: oklch(1 0 0);
+  }
+  .dark { display: none !important; }
+  html, body {
+    background: #fff !important;
+    color: #111 !important;
+    font-size: 11pt;
+  }
+  /* Hide non-essential UI */
+  [data-print-hidden] {
+    display: none !important;
+  }
+  /* Sidebar + topbar hidden */
+  aside, header.sticky {
+    display: none !important;
+  }
+  /* Main content takes full width */
+  main {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  /* Force-break inside cards to avoid splitting awkwardly */
+  .recharts-wrapper, .recharts-surface {
+    page-break-inside: avoid;
+  }
+  /* Print-only header */
+  [data-print-header] {
+    display: block !important;
+  }
+  /* Hide interactive-only elements when printing */
+  button[aria-label], .no-print {
+    display: none !important;
+  }
+}
+
+[data-print-header] {
+  display: none;
+}
+
+/* Animation utilities */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer-bg {
+  background: linear-gradient(90deg,
+    oklch(0.93 0.02 195 / 0.5) 0%,
+    oklch(0.9 0.04 195 / 0.8) 50%,
+    oklch(0.93 0.02 195 / 0.5) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.6s infinite;
+}
+.dark .shimmer-bg {
+  background: linear-gradient(90deg,
+    oklch(0.25 0.03 195 / 0.5) 0%,
+    oklch(0.3 0.04 195 / 0.8) 50%,
+    oklch(0.25 0.03 195 / 0.5) 100%);
+  background-size: 200% 100%;
+}
+
+/* Subtle pulse for live indicators */
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.92); }
+}
+.animate-soft-pulse {
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
+/* Gradient text helper — turquesa oficial */
+.gradient-text-emerald {
+  background: linear-gradient(135deg, #10616D 0%, #00B0B7 50%, #5FEAFF 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Brand gradient utilities */
+.bg-brand-gradient {
+  background: linear-gradient(135deg, #10616D 0%, #00B0B7 100%);
+}
+.bg-brand-gradient-soft {
+  background: linear-gradient(135deg, oklch(0.447 0.085 195 / 0.1) 0%, oklch(0.684 0.105 195 / 0.15) 100%);
+}
+.bg-brand-gradient-vivid {
+  background: linear-gradient(135deg, #10616D 0%, #00B0B7 45%, #5FEAFF 100%);
+}
+.text-brand-primary { color: #10616D; }
+.text-brand-secondary { color: #00B0B7; }
+.text-brand-highlight { color: #5FEAFF; }
+
+/* Glow effect for highlighted cards */
+.glow-turquoise {
+  box-shadow: 0 0 0 1px oklch(0.684 0.105 195 / 0.2), 0 8px 24px -8px oklch(0.447 0.085 195 / 0.3);
+}
+.dark .glow-turquoise {
+  box-shadow: 0 0 0 1px oklch(0.684 0.105 195 / 0.3), 0 8px 24px -8px oklch(0.684 0.105 195 / 0.4);
+}
