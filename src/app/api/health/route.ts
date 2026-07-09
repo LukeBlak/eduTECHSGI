@@ -13,6 +13,22 @@ export async function GET() {
       hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
       hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
       privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length ?? 0,
+      // Mostrar projectId raw y limpio para detectar \n fantasma
+      projectIdRaw: process.env.FIREBASE_PROJECT_ID
+        ? JSON.stringify(process.env.FIREBASE_PROJECT_ID)
+        : null,
+      projectIdClean: process.env.FIREBASE_PROJECT_ID
+        ? JSON.stringify(
+            process.env.FIREBASE_PROJECT_ID
+              .replace(/\\n/g, '')
+              .replace(/\n/g, '')
+              .replace(/\r/g, '')
+              .trim(),
+          )
+        : null,
+      clientEmailRaw: process.env.FIREBASE_CLIENT_EMAIL
+        ? JSON.stringify(process.env.FIREBASE_CLIENT_EMAIL)
+        : null,
       hasJwt: !!process.env.JWT_SECRET,
       hasSeed: !!process.env.SEED_SECRET,
       nodeVersion: typeof process !== 'undefined' ? process.version : 'unknown',

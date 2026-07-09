@@ -174,9 +174,24 @@ function ensureInit(): FirebaseApp | null {
     const appModule = getAppModule();
     const privateKey = decodePrivateKey(process.env.FIREBASE_PRIVATE_KEY!);
 
+    // Limpiar projectId y clientEmail: Vercel a veces incluye \n literales o
+    // espacios al copiar/pegar desde el JSON de Firebase. Esto rompe la
+    // conexión a Firestore con errores crípticos como:
+    // "Metadata string value 'projects/\nXXX/databases/(default)' contains illegal characters"
+    const cleanProjectId = process.env.FIREBASE_PROJECT_ID!
+      .replace(/\\n/g, "")
+      .replace(/\n/g, "")
+      .replace(/\r/g, "")
+      .trim();
+    const cleanClientEmail = process.env.FIREBASE_CLIENT_EMAIL!
+      .replace(/\\n/g, "")
+      .replace(/\n/g, "")
+      .replace(/\r/g, "")
+      .trim();
+
     const serviceAccount: ServiceAccount = {
-      projectId: process.env.FIREBASE_PROJECT_ID!,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
+      projectId: cleanProjectId,
+      clientEmail: cleanClientEmail,
       privateKey,
     };
 
