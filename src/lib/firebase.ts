@@ -45,7 +45,8 @@ function loadModule<T>(moduleName: string): T {
 }
 
 // Cargar los 2 submódulos necesarios con la API modular.
-// Esto se ejecuta una sola vez (al importar este archivo).
+// Se cargan LAZY (al primer uso) para que si fallan, podamos capturar el error
+// en vez de romper todo el proceso al importar el archivo.
 interface AppModule {
   initializeApp: (
     config: { credential: unknown; databaseURL?: string },
@@ -62,8 +63,31 @@ interface FirestoreModule {
   initializeFirestore?: (app: FirebaseApp, settings: unknown) => Firestore;
 }
 
-const appModule = loadModule<AppModule>("firebase-admin/app");
-const firestoreModule = loadModule<FirestoreModule>("firebase-admin/firestore");
+let _appModule: AppModule | null = null;
+let _firestoreModule: FirestoreModule | null = null;
+let _moduleLoadError: string | null = null;
+
+function getAppModule(): AppModule {
+  if (_appModule) return _appModule;
+  try {
+    _appModule = loadModule<AppModule>("firebase-admin/app");
+    return _appModule;
+  } catch (e) {
+    _moduleLoadError = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
+
+function getFirestoreModule(): FirestoreModule {
+  if (_firestoreModule) return _firestoreModule;
+  try {
+    _firestoreModule = loadModule<FirestoreModule>("firebase-admin/firestore");
+    return _firestoreModule;
+  } catch (e) {
+    _moduleLoadError = e instanceof Error ? e.message : String(e);
+    throw e;
+  }
+}
 
 const APP_NAME = "edutech-esen";
 
@@ -146,6 +170,8 @@ function ensureInit(): FirebaseApp | null {
   }
 
   try {
+    // Cargar módulo lazy (lanza si no se puede cargar)
+    const appModule = getAppModule();
     const privateKey = decodePrivateKey(process.env.FIREBASE_PRIVATE_KEY!);
 
     const serviceAccount: ServiceAccount = {
@@ -209,6 +235,8 @@ export function getFirestore(): Firestore | null {
   if (g.__firestore) return g.__firestore;
 
   try {
+    // Cargar módulo lazy
+    const firestoreModule = getFirestoreModule();
     // API modular: getFirestore(app) en vez de app.firestore()
     if (typeof firestoreModule.getFirestore !== "function") {
       throw new Error(
@@ -252,11 +280,28 @@ export function getAuth(): unknown | null {
 }
 
 // Re-export para compatibilidad con código existente que importa `admin`.
-// Pero los servicios deberían usar getFirestore() directamente.
-export const admin = {
-  ...appModule,
-  ...firestoreModule,
-  firestore: () => getFirestore(),
-  app: () => ensureInit(),
-};
+// Es un getter lazy para que no intente cargar módulos al importar el archivo.
+export const admin = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      // Permite admin.firestore, admin.credential, admin.initializeApp, etc.
+      try {
+        const am = getAppModule();
+        if (prop in am) return (am as never)[prop];
+      } catch {
+        /* noop */
+      }
+      try {
+        const fm = getFirestoreModule();
+        if (prop in fm) return (fm as never)[prop];
+      } catch {
+        /* noop */
+      }
+      if (prop === "firestore") return () => getFirestore();
+      if (prop === "app") return () => ensureInit();
+      return undefined;
+    },
+  },
+);
 export type { ServiceAccount };
