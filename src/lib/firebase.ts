@@ -1,17 +1,18 @@
 /**
- * Firebase Admin SDK — inicialización singleton.
+ * Firebase Admin SDK — inicialización singleton (robusta para Vercel).
  *
- * Lee las credenciales desde variables de entorno (configuradas en Vercel):
+ * Lee las credenciales desde variables de entorno:
  *  - FIREBASE_PROJECT_ID
  *  - FIREBASE_CLIENT_EMAIL
- *  - FIREBASE_PRIVATE_KEY  (la clave privada PEM, con \n escapados)
- *  - FIREBASE_DATABASE_URL (opcional — solo si usas Realtime DB)
- *
- * Si las variables no están configuradas, `getFirestore()` retorna null
- * y los servicios deben degradar gracefully (modo demo / error claro).
+ *  - FIREBASE_PRIVATE_KEY  (la clave PEM — acepta \n literales, newlines reales,
+ *                           o comillas envolventes; se normaliza todo)
+ *  - FIREBASE_DATABASE_URL (opcional)
  *
  * El singleton se cachea en globalThis para sobrevivir HMR en desarrollo
  * y las cold starts de Vercel serverless.
+ *
+ * Errores de inicialización se guardan en `__firebaseInitError` para que
+ * los servicios puedan devolver mensajes claros al frontend en vez de 500 genéricos.
  */
 import admin, { type ServiceAccount } from "firebase-admin";
 
@@ -26,56 +27,114 @@ export function isFirebaseConfigured(): boolean {
   );
 }
 
-/** Decodifica la private key PEM desde el formato env (con \n literales). */
+/**
+ * Decodifica la private key PEM desde el formato env.
+ *
+ * Vercel / .env pueden entregar la clave de varias formas:
+ *  1. Con `\n` literales (lo más común al copiar del JSON de Firebase)
+ *  2. Con newlines reales (si se pegó con saltos de línea)
+ *  3. Envuelta en comillas dobles `"..."` (a veces Vercel las preserva)
+ *  4. Con espacios al inicio/final
+ *
+ * Esta función normaliza todo a un PEM válido que empiece con
+ * `-----BEGIN PRIVATE KEY-----` y termine con `-----END PRIVATE KEY-----`.
+ */
 function decodePrivateKey(raw: string): string {
-  // En .env las newlines se guardan como "\n" literales.
-  // Vercel las preserva, pero por seguridad normalizamos.
-  return raw.replace(/\\n/g, "\n");
+  let key = raw.trim();
+
+  // Quitar comillas envolventes si las hay (pueden venir de .env o de Vercel).
+  if (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+
+  // Convertir `\n` literales a newlines reales.
+  // Si la clave ya tiene newlines reales, replace no hace nada (no hay `\n` literales).
+  if (key.includes("\\n")) {
+    key = key.replace(/\\n/g, "\n");
+  }
+
+  // Validación mínima: debe contener los marcadores PEM.
+  if (!key.includes("BEGIN PRIVATE KEY") || !key.includes("END PRIVATE KEY")) {
+    throw new Error(
+      "FIREBASE_PRIVATE_KEY no tiene formato PEM válido. " +
+        "Debe contener '-----BEGIN PRIVATE KEY-----' y '-----END PRIVATE KEY-----'. " +
+        "Verifica que copiaste el campo private_key completo del JSON de Firebase.",
+    );
+  }
+
+  return key;
 }
 
-let initialized = false;
+/** Error de inicialización cacheado (para mostrar al usuario, no 500 genérico). */
+export function getFirebaseInitError(): string | null {
+  const g = globalThis as unknown as { __firebaseInitError?: string };
+  return g.__firebaseInitError ?? null;
+}
 
 /** Inicializa la app de Firebase Admin (idempotente). */
 function ensureInit(): admin.app.App | null {
-  if (initialized) {
-    try {
-      return admin.app(APP_NAME);
-    } catch {
-      // fall through to re-init
-    }
-  }
+  const g = globalThis as unknown as {
+    __firebaseApp?: admin.app.App;
+    __firebaseInitError?: string;
+  };
 
-  // Cache en globalThis para sobrevivir HMR / cold starts.
-  const g = globalThis as unknown as { __firebaseApp?: admin.app.App };
+  // Ya inicializada exitosamente.
   if (g.__firebaseApp) {
-    initialized = true;
     return g.__firebaseApp;
   }
 
-  if (!isFirebaseConfigured()) {
+  // Ya falló antes en esta cold start — no reintentes infinitamente.
+  if (g.__firebaseInitError) {
     return null;
   }
 
-  const serviceAccount: ServiceAccount = {
-    projectId: process.env.FIREBASE_PROJECT_ID!,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
-    privateKey: decodePrivateKey(process.env.FIREBASE_PRIVATE_KEY!),
-  };
+  if (!isFirebaseConfigured()) {
+    g.__firebaseInitError =
+      "Firebase no está configurado. Faltan variables de entorno: " +
+      "FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL y/o FIREBASE_PRIVATE_KEY. " +
+      "Agrega las 3 en Vercel → Settings → Environment Variables.";
+    console.error("[Firebase]", g.__firebaseInitError);
+    return null;
+  }
 
-  const app = admin.initializeApp(
-    {
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-    },
-    APP_NAME,
-  );
+  try {
+    const privateKey = decodePrivateKey(process.env.FIREBASE_PRIVATE_KEY!);
 
-  g.__firebaseApp = app;
-  initialized = true;
-  return app;
+    const serviceAccount: ServiceAccount = {
+      projectId: process.env.FIREBASE_PROJECT_ID!,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
+      privateKey,
+    };
+
+    // Verifica si ya existe una app con ese nombre (HMR / cold start reuse).
+    let app: admin.app.App;
+    try {
+      app = admin.app(APP_NAME);
+    } catch {
+      app = admin.initializeApp(
+        {
+          credential: admin.credential.cert(serviceAccount),
+          databaseURL: process.env.FIREBASE_DATABASE_URL || undefined,
+        },
+        APP_NAME,
+      );
+    }
+
+    g.__firebaseApp = app;
+    console.log("[Firebase] Inicializado OK — project:", process.env.FIREBASE_PROJECT_ID);
+    return app;
+  } catch (e) {
+    g.__firebaseInitError =
+      e instanceof Error ? e.message : "Error desconocido al inicializar Firebase";
+    console.error("[Firebase] Error de inicialización:", g.__firebaseInitError);
+    return null;
+  }
 }
 
-/** Firestore singleton (o null si no está configurado). */
+/** Firestore singleton (o null si no está configurado / falló init). */
 export function getFirestore(): admin.firestore.Firestore | null {
   const app = ensureInit();
   if (!app) return null;

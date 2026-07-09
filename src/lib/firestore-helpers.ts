@@ -11,6 +11,7 @@
  */
 import {
   getFirestore,
+  getFirebaseInitError,
   admin,
 } from "@/lib/firebase";
 import type { firestore as firestoreNs } from "firebase-admin";
@@ -19,6 +20,23 @@ type Firestore = admin.firestore.Firestore;
 type DocumentData = admin.firestore.DocumentData;
 type WriteBatch = admin.firestore.WriteBatch;
 type WhereFilterOp = firestoreNs.WhereFilterOp;
+
+/**
+ * Error claro cuando Firebase no está disponible.
+ * Incluye el mensaje exacto de por qué falló la inicialización
+ * (credenciales faltantes, private key mal formateada, etc.)
+ * para que el frontend lo muestre en vez de un 500 genérico.
+ */
+export class FirebaseUnavailableError extends Error {
+  constructor() {
+    const reason = getFirebaseInitError();
+    super(
+      reason ??
+        "Firebase no está disponible. Configura las credenciales en las variables de entorno.",
+    );
+    this.name = "FirebaseUnavailableError";
+  }
+}
 
 /** Nombres de colecciones — espejo de los modelos Prisma. */
 export const COLLECTIONS = {
@@ -58,9 +76,7 @@ export function generateId(): string {
 function requireFs(): Firestore {
   const fs = getFirestore();
   if (!fs) {
-    throw new Error(
-      "Firebase no está configurado. Establece FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL y FIREBASE_PRIVATE_KEY en las variables de entorno.",
-    );
+    throw new FirebaseUnavailableError();
   }
   return fs;
 }
