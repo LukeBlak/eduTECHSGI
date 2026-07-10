@@ -1,87 +1,29 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+skills/
+node_modules/
 
-# dependencies
-node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# Build artifacts
+.next/
+out/
+dist/
 
-# testing
-/coverage
+# Env files (contain secrets)
+.env
+.env.local
+.env*.local
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-!.env.example
-
-# vercel
-.vercel
-
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-local-*
-.claude
-.z-ai-config
-*.log
+# Dev logs
 dev.log
-dev.out.log
-test
-prompt
+*.log
 
-server.log
-# Skills directory
-/skills/
-
-# Base de datos local (SQLite sandbox)
-db/
-*.db
-*.db-journal
-
-# Artefactos del sandbox
+# Uploads (user-pasted files, not part of source)
 upload/
-download/
-tool-results/
-agent-ctx/
-dev.pid
-server.pid
-*.pid
-server.log
 
-# Mini-services runtime artifacts
-mini-services/*/dev.pid
-mini-services/*/node_modules/
-mini-services/*/*.log
+# Screenshots (verification artifacts)
+screenshots/
 
-# Vercel
-.vercel
+# Firebase runtime state
+.firebase-*.json
 
-# Notas internas del agente (sandbox)
-worklog.md
-
-# Config de servicios escrita en runtime por email/firebase services
-.email-config.json
-.email-state.json
-.firebase-config.json
-.firebase-state.json
+# OS files
+.DS_Store
+Thumbs.db

@@ -84,8 +84,46 @@ function requireFs(): Firestore {
 /* ─── READ ──────────────────────────────────────────────────────── */
 
 /**
+ * Compara dos valores para ordenamiento client-side.
+ * Soporta strings (localeCompare), números, fechas ISO y null/undefined.
+ * null/undefined se ordenan al final en `desc` y al inicio en `asc`.
+ */
+function compareValues(a: unknown, b: unknown, direction: "asc" | "desc" = "asc"): number {
+  const mul = direction === "desc" ? -1 : 1;
+  // null/undefined van al final siempre
+  if (a == null && b == null) return 0;
+  if (a == null) return 1; // a va después
+  if (b == null) return -1; // b va después
+
+  // Números
+  if (typeof a === "number" && typeof b === "number") {
+    return (a - b) * mul;
+  }
+  // Strings (incluye fechas ISO — orden lexicográfico == orden cronológico para ISO)
+  if (typeof a === "string" && typeof b === "string") {
+    return a.localeCompare(b) * mul;
+  }
+  // Booleanos
+  if (typeof a === "boolean" && typeof b === "boolean") {
+    return ((a ? 1 : 0) - (b ? 1 : 0)) * mul;
+  }
+  // Fallback: comparar como strings
+  return String(a).localeCompare(String(b)) * mul;
+}
+
+/**
  * Busca todos los docs de una colección, opcionalmente filtrados.
  * Retorna array plano (sin el ID dentro del doc — se añade como `id`).
+ *
+ * IMPORTANTE — Estrategia anti-composite-index:
+ * Firestore REQUIERE composite indexes (creados manualmente en la consola)
+ * para cualquier query que combine `where` en un campo + `orderBy` en OTRO
+ * campo diferente. Como las colecciones de esta app son pequeñas (notifs
+ * por usuario, horas por voluntario, etc.), hacemos el orderBy CLIENT-SIDE
+ * cuando hay ambos. Esto evita 500s por missing index en producción.
+ *
+ * Si solo hay `orderBy` (sin where), usamos el orderBy nativo de Firestore
+ * (single-field indexes son auto-creados).
  */
 export async function findAll<T = DocumentData>(
   collection: CollectionName,
@@ -99,8 +137,12 @@ export async function findAll<T = DocumentData>(
   const fs = requireFs();
   let q: Query = fs.collection(COLLECTIONS[collection]);
 
-  if (opts?.where) {
-    for (const [field, condition] of Object.entries(opts.where)) {
+  const hasWhere = !!opts?.where && Object.keys(opts.where).length > 0;
+  const hasOrderBy = !!opts?.orderBy;
+
+  // Aplicar where clauses SIEMPRE al query nativo (equality no necesita composite index).
+  if (hasWhere) {
+    for (const [field, condition] of Object.entries(opts!.where!)) {
       if (condition && typeof condition === "object" && "op" in (condition as any)) {
         const c = condition as { op: WhereFilterOp; value: unknown };
         q = q.where(field, c.op, c.value);
@@ -110,20 +152,42 @@ export async function findAll<T = DocumentData>(
     }
   }
 
-  if (opts?.orderBy) {
-    q = q.orderBy(opts.orderBy.field, opts.orderBy.direction ?? "asc");
+  // Estrategia anti-composite-index:
+  //  - Si solo hay orderBy (sin where) → usar orderBy nativo (single-field index auto-creado).
+  //  - Si hay where + orderBy → NO usar orderBy nativo (requeriría composite index).
+  //    Hacemos el sort client-side después del fetch.
+  const needsClientSideSort = hasWhere && hasOrderBy;
+  if (hasOrderBy && !needsClientSideSort) {
+    q = q.orderBy(opts!.orderBy!.field, opts!.orderBy!.direction ?? "asc");
   }
 
-  if (opts?.limit) {
+  // Si vamos a sortear client-side, NO aplicamos limit al query nativo (necesitamos
+  // todos los docs para ordenar correctamente antes de aplicar limit).
+  if (opts?.limit && !needsClientSideSort) {
     q = q.limit(opts.limit);
   }
 
-  // offset se aplica después (Firestore no soporta offset nativo bien, se hace con startAfter en producción)
   const snap = await q.get();
   let results = snap.docs.map((d) => ({ id: d.id, ...(d.data() as T) }));
 
+  // Sort client-side si where + orderBy (evita composite index).
+  if (needsClientSideSort) {
+    const { field, direction = "asc" } = opts!.orderBy!;
+    results.sort((a, b) => {
+      const av = (a as Record<string, unknown>)[field];
+      const bv = (b as Record<string, unknown>)[field];
+      return compareValues(av, bv, direction);
+    });
+  }
+
+  // offset se aplica después del sort client-side.
   if (opts?.offset && opts.offset > 0) {
     results = results.slice(opts.offset);
+  }
+
+  // limit se aplica DESPUÉS del sort client-side (para que el top-N sea correcto).
+  if (opts?.limit && needsClientSideSort) {
+    results = results.slice(0, opts.limit);
   }
 
   return results;
