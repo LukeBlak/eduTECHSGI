@@ -67,10 +67,10 @@ const TIERS = {
 
 const MILESTONE_AWARDS: { threshold: number; award: Award }[] = [
   { threshold: 200, award: { id: "200h", label: "Leyenda", description: "200+ horas sociales", icon: Crown, color: "graphite" } },
-  { threshold: 100, award: { id: "100h", label: "Meta alcanzada", description: "100+ horas (meta ESEN)", icon: Target, color: "emerald" } },
-  { threshold: 50, award: { id: "50h", label: "Comprometido", description: "50+ horas sociales", icon: ShieldCheck, color: "violet" } },
-  { threshold: 25, award: { id: "25h", label: "Constante", description: "25+ horas sociales", icon: Zap, color: "sky" } },
-  { threshold: 10, award: { id: "10h", label: "Iniciador", description: "10+ horas sociales", icon: Star, color: "rose" } },
+  { threshold: 50, award: { id: "50h", label: "Destacado", description: "50+ horas sociales", icon: ShieldCheck, color: "violet" } },
+  { threshold: 25, award: { id: "25h", label: "Comprometido", description: "25+ horas sociales", icon: Zap, color: "sky" } },
+  { threshold: 10, award: { id: "10h", label: "Meta alcanzada", description: "10+ horas (meta ESEN)", icon: Target, color: "emerald" } },
+  { threshold: 5, award: { id: "5h", label: "Constante", description: "5+ horas sociales", icon: Star, color: "rose" } },
   { threshold: 1, award: { id: "1h", label: "Primer paso", description: "Primera hora social", icon: Flame, color: "orange" } },
 ];
 
@@ -185,7 +185,7 @@ export function RankingSection() {
   // Aggregate stats
   const stats = useMemo(() => {
     const totalHoursSum = ranking.reduce((s, r) => s + r.totalHours, 0);
-    const goalAchievers = ranking.filter((r) => r.totalHours >= 100).length;
+    const goalAchievers = ranking.filter((r) => r.totalHours >= 10).length;
     const avgHours = ranking.length > 0 ? totalHoursSum / ranking.length : 0;
     const maxHours = ranking.length > 0 ? ranking[0].totalHours : 0;
     return { totalHoursSum, goalAchievers, avgHours, maxHours, count: ranking.length };
@@ -312,7 +312,7 @@ export function RankingSection() {
           description="Acumuladas por voluntarios"
         />
         <KpiCard
-          title="Meta 100h"
+          title="Meta 10h"
           value={stats.goalAchievers}
           icon={Target}
           accent="violet"

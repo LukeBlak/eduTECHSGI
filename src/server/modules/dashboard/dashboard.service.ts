@@ -188,9 +188,9 @@ export class DashboardService {
       };
     });
 
-    // 4) Top voluntarios por horas + cálculo de meta alcanzada (100h).
+    // 4) Top voluntarios por horas + cálculo de meta alcanzada (10h).
     //    Reemplaza: volunteer.findMany({ include: { socialHours: true, committee: true } })
-    const HOUR_GOAL = 100;
+    const HOUR_GOAL = 10;
     const volunteerHoursList = volunteers.map((v) => {
       const vHours = socialHoursByVolunteer.get(v.id) ?? [];
       const committee = committeesById.get(v.committeeId ?? '');
@@ -207,7 +207,7 @@ export class DashboardService {
       .sort((a, b) => b.totalHours - a.totalHours)
       .slice(0, 5);
 
-    // KPI: voluntarios que han alcanzado la meta de 100h
+    // KPI: voluntarios que han alcanzado la meta de 10h
     const volunteersWithGoal = volunteerHoursList.filter((v) => v.totalHours >= HOUR_GOAL).length;
     const volunteersWithHoursCount = volunteerHoursList.filter((v) => v.totalHours > 0).length;
     const avgHoursPerVolunteer = totalVolunteers > 0

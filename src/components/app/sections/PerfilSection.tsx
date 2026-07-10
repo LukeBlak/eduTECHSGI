@@ -65,7 +65,7 @@ import {
 } from "@/lib/api";
 import { SectionHeader, EmptyState } from "../Shared";
 
-const HOUR_GOAL = 100; // Meta de horas sociales para la barra de progreso
+const HOUR_GOAL = 10; // Meta de horas sociales para la barra de progreso
 
 export function PerfilSection() {
   const { user } = useAuthStore();

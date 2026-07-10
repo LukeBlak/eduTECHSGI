@@ -940,8 +940,8 @@ export const AUTO_CRITERIA: {
   { id: "classes_count", label: "Clases impartidas", description: "Nº de clases completadas en las que fue instructor.", needsThreshold: true },
   { id: "social_records", label: "Registros de horas", description: "Nº de registros de horas sociales aprobados.", needsThreshold: true },
   { id: "first_activity", label: "Primera actividad", description: "Al completar su primera actividad.", needsThreshold: false },
-  { id: "hours_milestone_50", label: "Hito 50 horas", description: "Alcanza 50 horas sociales aprobadas.", needsThreshold: false },
-  { id: "hours_milestone_100", label: "Hito 100 horas", description: "Alcanza 100 horas sociales aprobadas.", needsThreshold: false },
+  { id: "hours_milestone_50", label: "Hito 5 horas", description: "Alcanza 5 horas sociales aprobadas.", needsThreshold: false },
+  { id: "hours_milestone_100", label: "Hito 10 horas (meta)", description: "Alcanza 10 horas sociales aprobadas (meta ESEN).", needsThreshold: false },
 ];
 
 export function autoCriteriaLabel(id: AutoCriteriaType | string | undefined): string {

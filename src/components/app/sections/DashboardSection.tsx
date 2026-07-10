@@ -426,12 +426,12 @@ export function DashboardSection() {
           accent="emerald"
           description={`${k.volunteersWithHours} de ${data.totalVolunteers} con horas`}
           progress={{
-            value: Math.min(100, (k.avgHoursPerVolunteer / 100) * 100),
-            label: `Meta: 100h por voluntario`,
+            value: Math.min(100, (k.avgHoursPerVolunteer / 10) * 100),
+            label: `Meta: 10h por voluntario`,
           }}
         />
         <KpiCard
-          title="Meta 100h alcanzada"
+          title="Meta 10h alcanzada"
           value={`${k.goalAchievementPct}%`}
           icon={Target}
           accent="graphite"
@@ -1122,7 +1122,7 @@ function DashboardSkeleton() {
    Volunteer personal dashboard — view for volunteer role.
    ============================================================ */
 
-const HOUR_GOAL = 100;
+const HOUR_GOAL = 10;
 
 function VolunteerDashboard({
   hours,
@@ -1541,7 +1541,7 @@ function computeInsights(data: DashboardData): Insight[] {
     }
   }
 
-  // 3. Goal achievement — 100h milestones
+  // 3. Goal achievement — 10h milestones
   if (data.totalVolunteers > 0) {
     const goalPct = data.kpis.goalAchievementPct;
     if (goalPct >= 25) {
@@ -1550,15 +1550,15 @@ function computeInsights(data: DashboardData): Insight[] {
         severity: "success",
         icon: Target,
         title: "Equipo cercano a la meta",
-        message: `${goalPct.toFixed(0)}% del equipo ha alcanzado la meta de 100 horas sociales. ${data.kpis.volunteersWithGoal} voluntario(s) cumplidos.`,
+        message: `${goalPct.toFixed(0)}% del equipo ha alcanzado la meta de 10 horas sociales. ${data.kpis.volunteersWithGoal} voluntario(s) cumplidos.`,
       });
     } else if (goalPct === 0 && data.kpis.volunteersWithHours > 0) {
       insights.push({
         id: "goal-none",
         severity: "info",
         icon: Target,
-        title: "Nadie ha alcanzado la meta de 100h",
-        message: `Hay ${data.kpis.volunteersWithHours} voluntario(s) con horas registradas, pero ninguno ha llegado a 100h. Promedio actual: ${data.kpis.avgHoursPerVolunteer.toFixed(1)}h.`,
+        title: "Nadie ha alcanzado la meta de 10h",
+        message: `Hay ${data.kpis.volunteersWithHours} voluntario(s) con horas registradas, pero ninguno ha llegado a 10h. Promedio actual: ${data.kpis.avgHoursPerVolunteer.toFixed(1)}h.`,
         hint: "Planifica actividades adicionales o sesiones de clases para acelerar el progreso.",
       });
     }

@@ -495,9 +495,9 @@ export class AchievementsService {
       case 'first_activity':
         return metrics.activitiesCount >= 1;
       case 'hours_milestone_50':
-        return metrics.hoursTotal >= 50;
+        return metrics.hoursTotal >= 5;
       case 'hours_milestone_100':
-        return metrics.hoursTotal >= 100;
+        return metrics.hoursTotal >= 10;
       case 'none':
       default:
         return false;

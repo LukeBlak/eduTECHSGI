@@ -16,7 +16,7 @@ interface SidebarProps {
   onClose?: () => void;
 }
 
-const GOAL_HOURS = 100;
+const GOAL_HOURS = 10;
 
 export function Sidebar({ active, onNavigate, onClose }: SidebarProps) {
   const { user } = useAuthStore();
