@@ -361,10 +361,16 @@ export class ClassesService {
     //   al finalizar esta clase se eliminan — incluyendo las ya aprobadas).
     //   El frontend muestra un diálogo de confirmación con la lista de
     //   instructores afectados antes de llegar aquí (ver previewDeleteImpact).
-    //   Las horas de clase se identifican por `classId === id`.
+    //
+    //   Borramos por AMBOS campos (belt-and-suspenders):
+    //   - `classId === id` → registros post-FIX-5 (classId seteado).
+    //   - `activityId === id` → registros post-FIX-5 también (activityId
+    //     fue seteado a cls.id en FIX-5). Esto es redundante con classId
+    //     pero no hace daño y protege contra inconsistencias de datos.
     await Promise.all([
       this.fs.deleteMany('classVolunteers', { where: { classId: id } }),
       this.fs.deleteMany('socialHours', { where: { classId: id } }),
+      this.fs.deleteMany('socialHours', { where: { activityId: id } }),
     ]);
     await this.fs.remove('classes', id);
     return { success: true };

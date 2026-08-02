@@ -134,7 +134,59 @@ export class SocialHoursService {
       where,
       orderBy: { field: 'date', direction: 'desc' },
     });
-    return Promise.all(hours.map((h) => this.enrichHour(h)));
+    const enriched = await Promise.all(hours.map((h) => this.enrichHour(h)));
+
+    // ─── Self-healing: limpiar horas huérfanas ───────────────────────
+    // Una hora huérfana es aquella cuyo origen (class o activity) fue
+    // eliminado sin cascada. Esto pasa con datos legacy creados antes
+    // de FIX-7 (activities) / FIX-8 (classes), que añadieron el
+    // deleteMany cascada a los respectivos remove().
+    //
+    // Casos detectados:
+    //  1. classId seteado pero class no existe → clase borrada sin cascada
+    //  2. activityId seteado (sin classId) pero activity no existe →
+    //     actividad borrada sin cascada
+    //  3. LEGACY (pre-FIX-5): sin classId, pero notes contiene
+    //     `[clase:ID]` y la clase ya no existe
+    //
+    // Los orphans se borran (fire-and-forget) y se excluyen del list
+    // retornado, así desaparecen automáticamente de la UI al cargar
+    // la página de Horas Sociales.
+    const orphanIds = new Set<string>();
+
+    // Casos 1 y 2: orphans detectables desde el enrich (class/activity null).
+    for (const h of enriched) {
+      if (h.classId && !h.class) orphanIds.add(h.id);
+      else if (h.activityId && !h.classId && !h.activity) orphanIds.add(h.id);
+    }
+
+    // Caso 3: legacy con marker `[clase:ID]` en notes. Necesitamos
+    // verificar existencia de la clase (lookup extra).
+    const legacyClassRe = /\[clase:([^\]]+)\]/;
+    const legacyChecks = enriched
+      .filter(
+        (h) => !h.classId && h.notes && legacyClassRe.test(h.notes),
+      )
+      .map(async (h) => {
+        const match = h.notes.match(legacyClassRe);
+        const legacyClassId = match?.[1];
+        if (!legacyClassId) return;
+        const cls = await this.fs.findById<ClassDoc>('classes', legacyClassId);
+        if (!cls) orphanIds.add(h.id); // clase inexistente → orphan
+      });
+    await Promise.all(legacyChecks);
+
+    // Borrar orphans (fire-and-forget, no bloquea el response).
+    if (orphanIds.size > 0) {
+      void Promise.all(
+        [...orphanIds].map((id) => this.fs.remove('socialHours', id)),
+      ).catch((err) =>
+        console.warn('[social-hours] Error al limpiar horas huérfanas:', err),
+      );
+    }
+
+    // Excluir orphans del listado retornado.
+    return enriched.filter((h) => !orphanIds.has(h.id));
   }
 
   /**
