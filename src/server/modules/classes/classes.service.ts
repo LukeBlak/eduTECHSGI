@@ -419,7 +419,12 @@ export class ClassesService {
           hours: hoursToAssign,
           type: 'field', // las clases siempre cuentan como horas de campo
           date: cls.date || new Date().toISOString().slice(0, 10),
-          notes: `${noteMarker} Horas asignadas automáticamente al finalizar la clase "${cls.title}"${
+          // La nota visible para el usuario NO incluye el ID de la clase
+          // (no queremos exponer IDs internos). El `noteMarker` solo se
+          // usa internamente como fallback de dedup para registros legacy
+          // (creados antes de que existiera el campo `classId`); los
+          // registros nuevos siempre llevan `classId` y se dedup por ahí.
+          notes: `Horas asignadas automáticamente al finalizar la clase "${cls.title}"${
             cls.school ? ` en ${cls.school}` : ''
           }.`,
           approvalStatus: 'approved',
