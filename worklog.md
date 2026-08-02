@@ -166,3 +166,31 @@ Stage Summary:
 - **Autor correcto**: LukeBlak <212150022+LukeBlak@users.noreply.github.com> (email noreply oficial de GitHub, reconocido por Vercel).
 - **Sincronizado**: local y remoto en `c819cbb`, force-pushed correctamente.
 - **Lección aprendida**: antes de `git commit --amend`, siempre verificar `git diff --cached --name-only` para asegurar que no haya archivos staged no deseados. El job programado webDevReview puede agregar archivos al staging area en paralelo.
+
+---
+Task ID: FIX-5
+Agent: main (Z.ai Code)
+Task: activityId de socialHours debe contener el ID de la clase (no null) cuando las horas provienen de finalizar una clase.
+
+Work Log:
+- Usuario reportó (con screenshots de Firebase Console):
+  - socialHour con `activityId: null`, `classId: "ActuuS8eusJav5DLI5sb"`, `notes: "[clase:ActuuS8eusJav5DLI5sb]..."`
+  - Clase "clase prueba" con durationHours: 2, status: completed
+  - El usuario quería ver el ID de la clase en `activityId`, no null.
+- Análisis: en FIX-3 añadí `classId` como campo separado y dejé `activityId: null` (decision semántica: las clases no son Activities). El usuario prefiere que `activityId` contenga el ID de la clase para trazabilidad directa desde Firebase Console.
+- Cambios en `classes.service.ts` complete():
+  - `activityId: cls.id` (antes era `null`) — ahora referencia el ID de la clase.
+  - `classId: cls.id` se mantiene como marcador de tipo (distingue horas de clase vs horas de activity real).
+  - Check de duplicados ahora usa `h.classId === cls.id` como condición principal (más robusto que buscar en notes). Notes sigue como fallback para horas legacy pre-classId.
+- Cambios en `social-hours.service.ts`:
+  - `enrichHour()`: si `classId` está seteado, NO hace lookup de `activityId` en `activities` (porque referencia una clase, no una activity real — el lookup devolvería null igual). Hace lookup en `classes` y lo expone como `class`.
+  - `approve()` y `reject()`: misma lógica que enrichHour. Mensajes de notificación ahora usan `sourceTitle = activity?.title || class?.title` para mostrar el origen correcto (actividad o clase).
+  - `create()`: `sourceTitle` para los mensajes de notificación.
+
+Stage Summary:
+- **activityId ahora referencia la clase**: en Firebase Console se verá `activityId: "ActuuS8eusJav5DLI5sb"` en vez de `null`.
+- **classId se mantiene**: como marcador de tipo. Si `classId` está seteado, el `activityId` referencia una clase; si no, referencia una activity real.
+- **Lookup inteligente**: enrichHour/approve/reject no hacen lookup inútil en `activities` cuando saben que `activityId` referencia una clase.
+- **Mensajes de notificación**: ahora muestran el título de la clase cuando la hora proviene de una clase (antes solo mostraban el título de la activity).
+- **Lint**: ✅ PASS (0 errores).
+- **Commit**: `18f15f9` pushed a origin/main.
