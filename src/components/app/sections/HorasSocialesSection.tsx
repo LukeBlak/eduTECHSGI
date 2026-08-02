@@ -201,7 +201,9 @@ export function HorasSocialesSection() {
           volunteers.find((v) => v.id === h.volunteerId)?.name || "",
         );
         const actTitle = norm(
-          activities.find((a) => a.id === h.activityId)?.title ||
+          h.activity?.title ||
+            h.class?.title ||
+            activities.find((a) => a.id === h.activityId)?.title ||
             "registro manual",
         );
         const notes = norm(h.notes || "");
@@ -269,6 +271,10 @@ export function HorasSocialesSection() {
     (user && user.id === id ? user.studentId : "");
   const actTitle = (id?: string | null) =>
     activities.find((a) => a.id === id)?.title || "Registro manual";
+
+  /** Resuelve el "origen" de una hora social: actividad, clase o registro manual. */
+  const hourSource = (h: SocialHour): string =>
+    h.activity?.title || h.class?.title || actTitle(h.activityId);
 
   async function handleDelete(h: SocialHour) {
     try {
@@ -648,10 +654,20 @@ export function HorasSocialesSection() {
                             </div>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            <Highlight
-                              text={actTitle(h.activityId)}
-                              query={searchTerm}
-                            />
+                            <div className="flex items-center gap-1.5">
+                              <Highlight
+                                text={hourSource(h)}
+                                query={searchTerm}
+                              />
+                              {h.classId && (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800"
+                                >
+                                  Clase
+                                </Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -751,7 +767,7 @@ export function HorasSocialesSection() {
                       hour={h}
                       volName={volName(h.volunteerId)}
                       volCarnet={volCarnet(h.volunteerId)}
-                      actTitle={actTitle(h.activityId)}
+                      actTitle={hourSource(h)}
                       reviewing={reviewing}
                       onApprove={() => handleApproveHour(h)}
                       onReject={() => setRejectTarget(h)}

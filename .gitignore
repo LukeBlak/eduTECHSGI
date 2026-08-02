@@ -20,6 +20,8 @@ upload/
 
 # Screenshots (verification artifacts)
 screenshots/
+qa_*.png
+pasted_image_*.png
 
 # Firebase runtime state
 .firebase-*.json
@@ -27,3 +29,47 @@ screenshots/
 # OS files
 .DS_Store
 Thumbs.db
+
+# ─── Local runtime / dev artifacts (never commit) ───
+
+# Process ID files
+*.pid
+dev.pid
+.zscripts/
+
+# Local databases (SQLite binary — app uses Firestore, not Prisma at runtime)
+db/*.db
+db/*.db-journal
+
+# Email runtime state
+.email-config.json
+.email-state.json
+
+# Downloaded files / QA screenshots
+download/
+
+# Tool result caches
+tool-results/
+
+# Agent context / handover notes (local development aids)
+agent-ctx/
+
+# Next.js auto-generated type declarations
+next-env.d.ts
+
+# Mini-service runtime artifacts
+mini-services/*/dev.pid
+mini-services/*/*.log
+
+# ─── Legacy Prisma/Firebase migration code (app uses Firestore via firestore-helpers) ───
+# These files import @prisma/client (not generated in Vercel) and break `next build`.
+# They are kept locally for reference but MUST NOT be committed.
+src/lib/db.ts
+src/server/core/prisma.provider.ts
+src/server/modules/firebase/
+src/app/api/firebase/
+src/components/app/sections/FirebaseSection.tsx
+prisma/migrations/
+prisma/schema.prisma
+
+

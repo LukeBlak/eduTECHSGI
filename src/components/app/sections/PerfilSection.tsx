@@ -468,7 +468,7 @@ export function PerfilSection() {
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
       .map((r) => [
         r.date || "—",
-        r.activity?.title || "Registro manual",
+        r.activity?.title || r.class?.title || "Registro manual",
         r.type === "admin" ? "Administrativa" : "De campo",
         r.hours,
         r.notes || "",
@@ -923,7 +923,17 @@ export function PerfilSection() {
                           {formatDate(r.date)}
                         </TableCell>
                         <TableCell className="font-medium">
-                          {r.activity?.title || "—"}
+                          <div className="flex items-center gap-1.5">
+                            {r.activity?.title || r.class?.title || "—"}
+                            {r.classId && (
+                              <Badge
+                                variant="outline"
+                                className="shrink-0 text-[10px] py-0 px-1.5 bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:border-emerald-800"
+                              >
+                                Clase
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge

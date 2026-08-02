@@ -320,6 +320,10 @@ export interface SocialHour {
   volunteer?: Pick<Volunteer, "id" | "name" | "studentId">;
   activityId?: string | null;
   activity?: Pick<Activity, "id" | "title"> | null;
+  /** ID de la clase que originó esta hora (auto-asignada al finalizar clase). */
+  classId?: string | null;
+  /** Lookup de la clase (si classId está seteado). */
+  class?: Pick<ClassItem, "id" | "title" | "school"> | null;
   hours: number;
   type: HourType;
   date?: string;

@@ -73,6 +73,12 @@ interface SocialHourDoc {
   id: string;
   volunteerId: string;
   activityId: string | null;
+  /**
+   * Referencia a la clase que generó estas horas (cuando fueron
+   * auto-asignadas al finalizar una clase). Es null para horas creadas
+   * manualmente o vinculadas a una `activity`.
+   */
+  classId: string | null;
   hours: number;
   type: 'admin' | 'field';
   date: string;
@@ -94,6 +100,10 @@ export class ClassesService {
   /**
    * Adjeta `committee` (lookup) e `instructors` (lookup de ClassVolunteer → Volunteer).
    * Mantiene el shape del retorno de Prisma: `instructors: [{ ...volunteer, role }]`.
+   *
+   * Deduplica classVolunteers por volunteerId (defensivo): si por un bug previo
+   * quedaron docs gemelos, solo se retorna una vez el instructor en la lista.
+   * El cleanup real de los docs duplicados ocurre en `update` (diff & sync).
    */
   private async enrichClass(c: ClassDoc) {
     const [committee, classVolunteers] = await Promise.all([
@@ -102,8 +112,15 @@ export class ClassesService {
         : Promise.resolve(null),
       this.fs.findAll<ClassVolunteerDoc>('classVolunteers', { where: { classId: c.id } }),
     ]);
+    // Dedup por volunteerId: conserva solo el primer doc de cada volunteer.
+    const seenVolunteerIds = new Set<string>();
+    const uniqueClassVolunteers = classVolunteers.filter((cv) => {
+      if (!cv.volunteerId || seenVolunteerIds.has(cv.volunteerId)) return false;
+      seenVolunteerIds.add(cv.volunteerId);
+      return true;
+    });
     const instructorsRaw = await Promise.all(
-      classVolunteers.map(async (ci) => {
+      uniqueClassVolunteers.map(async (ci) => {
         const volunteer = ci.volunteerId
           ? await this.fs.findById<VolunteerDoc>('volunteers', ci.volunteerId)
           : null;
@@ -132,6 +149,10 @@ export class ClassesService {
 
   async create(input: CreateClassInput) {
     const { instructorIds = [], ...rest } = input;
+    // Deduplicar instructores defensivamente (evita docs gemelos en
+    // classVolunteers si el frontend envía ids repetidos).
+    const uniqueInstructorIds = [...new Set(instructorIds.filter(Boolean))];
+
     const created = await this.fs.create<ClassDoc>('classes', {
       title: rest.title,
       date: rest.date ?? '',
@@ -145,9 +166,9 @@ export class ClassesService {
     });
 
     // Bulk attach instructors: ClassVolunteer.createMany → Promise.all(create).
-    if (instructorIds.length > 0) {
+    if (uniqueInstructorIds.length > 0) {
       await Promise.all(
-        instructorIds.map((volunteerId) =>
+        uniqueInstructorIds.map((volunteerId) =>
           this.fs.create<ClassVolunteerDoc>('classVolunteers', {
             classId: created.id,
             volunteerId,
@@ -207,12 +228,53 @@ export class ClassesService {
       rest.committeeId = (rest.committeeId || null) as string | null;
     }
 
-    // Reemplazo atómico del set de instructores: deleteMany + recreate.
+    // ─── Sync de instructores (diff & sync, NO delete-all + recreate) ───
+    // El approach anterior (deleteMany + recreate) era frágil: si el deleteMany
+    // no encontraba los docs (p.ej. por un where que no matcheaba), los creates
+    // se acumulaban y duplicaban a los instructores existentes.
+    //
+    // Nuevo approach idempotente:
+    //   1. Trae los classVolunteers existentes para esta clase.
+    //   2. Detecta duplicados (mismo volunteerId aparece >1 vez) y los marca
+    //      para borrado — limpia duplicados históricos.
+    //   3. Borra los que NO están en la nueva lista.
+    //   4. Crea solo los nuevos que no existen todavía.
+    //   5. Conserva los que ya estaban (sin delete+recreate innecesario).
     if (instructorIds) {
-      await this.fs.deleteMany('classVolunteers', { where: { classId: id } });
-      if (instructorIds.length > 0) {
+      const uniqueInstructorIds = [...new Set(instructorIds.filter(Boolean))];
+
+      const existing = await this.fs.findAll<ClassVolunteerDoc>('classVolunteers', {
+        where: { classId: id },
+      });
+
+      // Mapa volunteerId → primer doc encontrado; el resto son duplicados.
+      const existingByVolunteerId = new Map<string, ClassVolunteerDoc>();
+      const duplicates: ClassVolunteerDoc[] = [];
+      for (const cv of existing) {
+        if (existingByVolunteerId.has(cv.volunteerId)) {
+          duplicates.push(cv); // doc duplicado — limpiar
+        } else {
+          existingByVolunteerId.set(cv.volunteerId, cv);
+        }
+      }
+
+      const newSet = new Set(uniqueInstructorIds);
+      const toDelete = [
+        ...duplicates,
+        ...existing.filter((cv) => !newSet.has(cv.volunteerId)),
+      ];
+      const toCreate = uniqueInstructorIds.filter(
+        (vid) => !existingByVolunteerId.has(vid),
+      );
+
+      if (toDelete.length > 0) {
         await Promise.all(
-          instructorIds.map((volunteerId) =>
+          toDelete.map((cv) => this.fs.remove('classVolunteers', cv.id)),
+        );
+      }
+      if (toCreate.length > 0) {
+        await Promise.all(
+          toCreate.map((volunteerId) =>
             this.fs.create<ClassVolunteerDoc>('classVolunteers', {
               classId: id,
               volunteerId,
@@ -280,8 +342,16 @@ export class ClassesService {
     }
 
     // Lookup de instructores con su volunteer embebido (para notificaciones).
-    const classVolunteers = await this.fs.findAll<ClassVolunteerDoc>('classVolunteers', {
+    // Dedup por volunteerId: si por un bug previo quedaron docs gemelos en
+    // classVolunteers, no queremos asignar horas dobles al mismo instructor.
+    const allClassVolunteers = await this.fs.findAll<ClassVolunteerDoc>('classVolunteers', {
       where: { classId },
+    });
+    const seenVolunteerIds = new Set<string>();
+    const classVolunteers = allClassVolunteers.filter((cv) => {
+      if (!cv.volunteerId || seenVolunteerIds.has(cv.volunteerId)) return false;
+      seenVolunteerIds.add(cv.volunteerId);
+      return true;
     });
     const instructors = await Promise.all(
       classVolunteers.map(async (ci) => {
@@ -296,8 +366,10 @@ export class ClassesService {
     const assigned: { volunteerId: string; volunteerName: string; hours: number }[] = [];
     const skipped: { volunteerId: string; reason: string }[] = [];
 
-    // Para clases no hay un Activity al que asociar las horas; las creamos sueltas
-    // (activityId = null) con notas que mencionan la clase.
+    // Las clases NO son Activities en este modelo, así que activityId queda
+    // en null (correcto semánticamente). Pero guardamos `classId` para que la
+    // hora sea trazable a la clase que la originó (lookup en el enrich de
+    // social-hours.service.ts).
     if (hoursToAssign <= 0) {
       for (const { ci } of instructors) {
         skipped.push({
@@ -335,6 +407,7 @@ export class ClassesService {
         await this.fs.create<SocialHourDoc>('socialHours', {
           volunteerId: ci.volunteerId,
           activityId: null,
+          classId: cls.id,
           hours: hoursToAssign,
           type: 'field', // las clases siempre cuentan como horas de campo
           date: cls.date || new Date().toISOString().slice(0, 10),

@@ -57,6 +57,8 @@ interface SocialHourDoc {
   id: string;
   volunteerId: string;
   activityId: string | null;
+  /** ID de la clase que originó esta hora (si fue auto-asignada). */
+  classId?: string | null;
   hours: number;
   type: 'admin' | 'field';
   date: string;
@@ -69,6 +71,21 @@ interface SocialHourDoc {
   updatedAt: string;
 }
 
+interface ClassDoc {
+  id: string;
+  title: string;
+  date: string;
+  durationHours: number;
+  school: string;
+  topic: string;
+  description: string;
+  status: 'active' | 'completed';
+  completedAt: string | null;
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 @Injectable()
 export class SocialHoursService {
   private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
@@ -76,23 +93,29 @@ export class SocialHoursService {
   private readonly achievements = inject(AchievementsService);
 
   /**
-   * Adjeta `volunteer`, `activity` y `reviewer` (3-way join manual).
-   * `reviewer` es una self-FK a Volunteer (puede ser null si la hora fue
-   * auto-aprobada por sistema o el reviewer fue eliminado).
+   * Adjeta `volunteer`, `activity`, `class` y `reviewer` (4-way join manual).
+   * - `activity` se resuelve si `activityId` está seteado.
+   * - `class` se resuelve si `classId` está seteado (horas auto-asignadas
+   *   desde finalizar una clase).
+   * - `reviewer` es una self-FK a Volunteer (puede ser null si la hora fue
+   *   auto-aprobada por sistema o el reviewer fue eliminado).
    */
   private async enrichHour(h: SocialHourDoc) {
-    const [volunteer, activity, reviewer] = await Promise.all([
+    const [volunteer, activity, cls, reviewer] = await Promise.all([
       h.volunteerId
         ? this.fs.findById<VolunteerDoc>('volunteers', h.volunteerId)
         : Promise.resolve(null),
       h.activityId
         ? this.fs.findById<ActivityDoc>('activities', h.activityId)
         : Promise.resolve(null),
+      h.classId
+        ? this.fs.findById<ClassDoc>('classes', h.classId)
+        : Promise.resolve(null),
       h.reviewerId
         ? this.fs.findById<VolunteerDoc>('volunteers', h.reviewerId)
         : Promise.resolve(null),
     ]);
-    return { ...h, volunteer, activity, reviewer };
+    return { ...h, volunteer, activity, class: cls, reviewer };
   }
 
   async list(volunteerId?: string, filters: { approvalStatus?: string } = {}) {
