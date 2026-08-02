@@ -298,3 +298,37 @@ Stage Summary:
 - **UX consistente con activities**: diálogo ámbar con lista de instructores afectados (nombre, carné, horas, estado) antes de confirmar.
 - **Patrón replicable**: si en el futuro se añaden otros orígenes de horas (talleres, eventos, etc.), aplicar el mismo patrón: marcar con un campo `XXXId` en complete(), borrar por ese campo en remove(), exponer previewDeleteImpact.
 - **Nota sobre datos legacy**: las socialHours creadas antes de FIX-5 (que tenían `activityId: null` y solo el marker `[clase:ID]` en notes) NO serán detectadas por el `deleteMany({ where: { classId } })`. Si el usuario ve horas huérfanas de pruebas anteriores, pueden borrarse manualmente desde la consola de Firebase o desde la sección Horas Sociales.
+
+---
+Task ID: FIX-9
+Agent: main (Z.ai Code)
+Task: Las horas sociales huérfanas (de clases/actividades borradas antes de FIX-7/FIX-8) seguían apareciendo como "Registro manual" en la UI. FIX-7 y FIX-8 solo aplican a eliminaciones NUEVAS; no limpian orphans existentes.
+
+Work Log:
+- Análisis del screenshot del usuario (VLM):
+  - 3 filas en Horas Sociales, todas con badge "Clase" pero Actividad = "Registro manual"
+  - Row 1: notes `[claser8MahZ7zVbzLRkeNAVkh] Horas a…` → LEGACY (pre-FIX-6, tiene marker en notes)
+  - Rows 2&3: notes `Horas asignadas automáticamente al fin…` → post-FIX-6 (sin marker)
+  - Todas tienen classId seteado (badge Clase se muestra), pero la clase fue borrada sin cascada (antes de FIX-8)
+- Root cause: FIX-8 (deleteMany por classId en class remove()) solo aplica a eliminaciones NUEVAS. Los orphans existentes (creados antes del deploy de FIX-8) no se limpian retroactivamente.
+- Solución: self-healing en `social-hours.service.ts` `list()`:
+  - Después de enriquecer las horas, detecta orphans en 3 casos:
+    1. classId seteado pero class no existe → clase borrada sin cascada
+    2. activityId seteado (sin classId) pero activity no existe → actividad borrada sin cascada
+    3. LEGACY (pre-FIX-5): sin classId, pero notes contiene `[clase:ID]` y la clase no existe (verificación con lookup extra)
+  - Los orphans se borran fire-and-forget (no bloquea el response)
+  - Se excluyen del list retornado → desaparecen de la UI al cargar la página
+- Belt-and-suspenders en `classes.service.ts` `remove()`:
+  - Ahora borra socialHours por AMBOS campos: `classId === id` Y `activityId === id`
+  - FIX-5 seteó `activityId: cls.id` para horas de clase, así que borrar por activityId es redundante pero protege contra inconsistencias
+- Lint: ✅ PASS (0 errores).
+- Build: ✅ Compila correctamente.
+- Agent Browser: ✅ página / carga limpia.
+- Commit `d5e98a7` pushed a origin/main → Vercel auto-deploy.
+
+Stage Summary:
+- **Self-healing automático**: al cargar la página de Horas Sociales (o cualquier vista que liste horas), los orphans se detectan y borran automáticamente. No requiere intervención manual del usuario.
+- **3 casos cubiertos**: post-FIX-5 class orphans, post-FIX-5 activity orphans, y pre-FIX-5 legacy orphans (con marker `[clase:ID]` en notes).
+- **Fire-and-forget**: el borrado de orphans no bloquea el response de la lista. Los orphans se excluyen del resultado inmediatamente.
+- **Belt-and-suspenders**: class remove() ahora borra por classId Y activityId, protegiendo contra cualquier inconsistencia de datos.
+- **UX**: el usuario verá los orphans desaparecer automáticamente al cargar la página de Horas Sociales (puede requerir un refresh después de que Vercel despliegue).
