@@ -16,6 +16,8 @@ import {
   Filter,
   X,
   CheckCircle2,
+  AlertTriangle,
+  Hourglass,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,6 +96,18 @@ export function ClasesSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ClassItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClassItem | null>(null);
+  const [deleteImpact, setDeleteImpact] = useState<{
+    socialHoursCount: number;
+    totalHours: number;
+    affectedMembers: {
+      volunteerId: string;
+      volunteerName: string;
+      studentId: string | null;
+      hours: number;
+      approvalStatus: string;
+    }[];
+  } | null>(null);
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
   const [completeTarget, setCompleteTarget] = useState<ClassItem | null>(null);
   const [completing, setCompleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -184,11 +198,38 @@ export function ClasesSection() {
     setToDate("");
   }
 
+  // Al abrir el diálogo de eliminación, precarga el impacto (horas sociales
+  // que se borrarán + instructores afectados) para mostrarlo en la confirmación.
+  async function handleRequestDelete(c: ClassItem) {
+    setDeleteTarget(c);
+    setDeleteImpact(null);
+    setDeleteImpactLoading(true);
+    try {
+      const impact = await classesApi.deleteImpact(c.id);
+      setDeleteImpact({
+        socialHoursCount: impact.socialHoursCount,
+        totalHours: impact.totalHours,
+        affectedMembers: impact.affectedMembers,
+      });
+    } catch {
+      // Si falla el preview, dejamos que el usuario continúe sin info extra.
+      setDeleteImpact(null);
+    } finally {
+      setDeleteImpactLoading(false);
+    }
+  }
+
   async function handleDelete(c: ClassItem) {
     try {
       await classesApi.remove(c.id);
-      toast.success("Clase eliminada");
+      const count = deleteImpact?.socialHoursCount ?? 0;
+      toast.success(
+        count > 0
+          ? `Clase eliminada · ${count} hora(s) social(es) borradas`
+          : "Clase eliminada",
+      );
       setDeleteTarget(null);
+      setDeleteImpact(null);
       load();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Error al eliminar");
@@ -441,7 +482,7 @@ export function ClasesSection() {
                           variant="ghost"
                           size="icon"
                           className="size-8 text-destructive"
-                          onClick={() => setDeleteTarget(c)}
+                          onClick={() => handleRequestDelete(c)}
                           aria-label="Eliminar"
                         >
                           <Trash2 className="size-4" />
@@ -550,23 +591,119 @@ export function ClasesSection() {
 
       <AlertDialog
         open={!!deleteTarget}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDeleteTarget(null);
+            setDeleteImpact(null);
+          }
+        }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar clase?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se eliminará permanentemente{" "}
-              <span className="font-medium">{deleteTarget?.title}</span>.
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-5 text-destructive" />
+              ¿Eliminar clase?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-sm text-muted-foreground">
+                Se eliminará permanentemente{" "}
+                <span className="font-medium text-foreground">
+                  {deleteTarget?.title}
+                </span>
+                .
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Bloque de advertencia: horas sociales que se borrarán */}
+          {deleteImpactLoading ? (
+            <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-950/30 p-3 text-sm text-amber-800 dark:text-amber-300">
+              <Loader2 className="size-4 animate-spin" />
+              Cargando horas sociales vinculadas…
+            </div>
+          ) : deleteImpact && deleteImpact.socialHoursCount > 0 ? (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/40 p-3 space-y-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                    Esta clase tiene{" "}
+                    <span className="font-bold">
+                      {deleteImpact.socialHoursCount}
+                    </span>{" "}
+                    hora(s) social(es) asignadas que{" "}
+                    <span className="font-bold">se borrarán automáticamente</span>{" "}
+                    (incluyendo las ya aprobadas). Total:{" "}
+                    <span className="font-bold">{deleteImpact.totalHours}h</span>.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  Instructores afectados ({deleteImpact.affectedMembers.length}):
+                </p>
+                <div className="max-h-48 overflow-y-auto rounded-md bg-white/60 dark:bg-black/20 divide-y divide-amber-100 dark:divide-amber-900/30">
+                  {deleteImpact.affectedMembers.map((m) => (
+                    <div
+                      key={m.volunteerId}
+                      className="flex items-center justify-between gap-2 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Hourglass className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {m.volunteerName}
+                          </p>
+                          {m.studentId && (
+                            <p className="text-xs text-muted-foreground truncate">
+                              {m.studentId}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Badge
+                          variant="outline"
+                          className="border-amber-300 text-amber-700 dark:border-amber-700 dark:text-amber-300 text-xs"
+                        >
+                          {m.hours}h
+                        </Badge>
+                        {m.approvalStatus === "approved" && (
+                          <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 text-xs">
+                            Aprobada
+                          </Badge>
+                        )}
+                        {m.approvalStatus === "pending" && (
+                          <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 text-xs">
+                            Pendiente
+                          </Badge>
+                        )}
+                        {m.approvalStatus === "rejected" && (
+                          <Badge variant="secondary" className="text-xs">
+                            Rechazada
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : deleteImpact && deleteImpact.socialHoursCount === 0 ? (
+            <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 dark:border-emerald-900/40 dark:bg-emerald-950/30 p-3 text-sm text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="size-4" />
+              Esta clase no tiene horas sociales asignadas. La eliminación
+              no afectará registros de horas.
+            </div>
+          ) : null}
+
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
-              Eliminar
+              Sí, eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

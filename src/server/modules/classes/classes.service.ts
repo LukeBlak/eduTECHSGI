@@ -296,9 +296,76 @@ export class ClassesService {
     return this.enrichClass(updated);
   }
 
+  /**
+   * Previsualiza el impacto de eliminar una clase: lista las horas
+   * sociales (con voluntario) que se borrarían automáticamente al
+   * confirmar la eliminación. El frontend lo usa para mostrar el diálogo
+   * de confirmación con la lista de instructores afectados.
+   *
+   * Las horas sociales originadas por finalizar una clase tienen
+   * `classId === cls.id` (ver complete()). Buscamos por ese campo.
+   */
+  async previewDeleteImpact(id: string): Promise<{
+    classId: string;
+    title: string;
+    socialHoursCount: number;
+    totalHours: number;
+    affectedMembers: {
+      volunteerId: string;
+      volunteerName: string;
+      studentId: string | null;
+      hours: number;
+      approvalStatus: string;
+    }[];
+  }> {
+    const cls = await this.fs.findById<ClassDoc>('classes', id);
+    const title = cls?.title ?? '(clase eliminada)';
+    const socialHours = cls
+      ? await this.fs.findAll<SocialHourDoc>('socialHours', { where: { classId: id } })
+      : [];
+
+    // Lookup de voluntarios para resolver nombres.
+    const volunteerIds = [...new Set(socialHours.map((h) => h.volunteerId).filter(Boolean))];
+    const volunteers = await Promise.all(
+      volunteerIds.map((vid) => this.fs.findById<VolunteerDoc>('volunteers', vid)),
+    );
+    const volById = new Map<string, VolunteerDoc>();
+    for (const v of volunteers) {
+      if (v) volById.set(v.id, v);
+    }
+
+    const affectedMembers = socialHours.map((h) => {
+      const v = volById.get(h.volunteerId);
+      return {
+        volunteerId: h.volunteerId,
+        volunteerName: v?.name ?? 'Voluntario',
+        studentId: v?.studentId ?? null,
+        hours: h.hours,
+        approvalStatus: h.approvalStatus,
+      };
+    });
+
+    return {
+      classId: id,
+      title,
+      socialHoursCount: socialHours.length,
+      totalHours: socialHours.reduce((sum, h) => sum + (h.hours || 0), 0),
+      affectedMembers,
+    };
+  }
+
   async remove(id: string) {
-    // Cascade manual: ClassVolunteer es onDelete: Cascade en el schema Prisma.
-    await this.fs.deleteMany('classVolunteers', { where: { classId: id } });
+    // Firestore no tiene FK cascade: limpiamos manualmente las relaciones.
+    // - classVolunteers: onDelete: Cascade → borrar
+    // - socialHours: onDelete: Cascade → BORRAR (las horas auto-asignadas
+    //   al finalizar esta clase se eliminan — incluyendo las ya aprobadas).
+    //   El frontend muestra un diálogo de confirmación con la lista de
+    //   instructores afectados antes de llegar aquí (ver previewDeleteImpact).
+    //   Las horas de clase se identifican por `classId === id`.
+    await Promise.all([
+      this.fs.deleteMany('classVolunteers', { where: { classId: id } }),
+      this.fs.deleteMany('socialHours', { where: { classId: id } }),
+    ]);
     await this.fs.remove('classes', id);
     return { success: true };
   }

@@ -68,6 +68,23 @@ export class ClassesController {
   }
 
   /**
+   * GET /api/classes/[id]/delete-impact — previsualiza el impacto de
+   * eliminar la clase: lista de horas sociales (con voluntario) que
+   * se borrarían automáticamente. El frontend lo usa para mostrar el
+   * diálogo de confirmación con los instructores afectados.
+   */
+  async deleteImpact(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+    try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
+      const { id } = await ctx.params;
+      return ok(await this.service.previewDeleteImpact(id));
+    } catch (e) {
+      return serverError('Error al previsualizar el impacto de eliminación', e);
+    }
+  }
+
+  /**
    * POST /api/classes/[id]/complete — finaliza la clase.
    * Solo roles privilegiados. Asigna automáticamente las horas (durationHours)
    * a cada instructor.

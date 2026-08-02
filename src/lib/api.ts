@@ -745,6 +745,25 @@ export const classesApi = {
     instructorIds: string[];
   }>) => fetchApi<ClassItem>(`/classes/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   remove: (id: string) => fetchApi<{ success: boolean }>(`/classes/${id}`, { method: "DELETE" }),
+  /**
+   * Previsualiza el impacto de eliminar una clase: lista las horas
+   * sociales (con voluntario) que se borrarían automáticamente al
+   * confirmar la eliminación.
+   */
+  deleteImpact: (id: string) =>
+    fetchApi<{
+      classId: string;
+      title: string;
+      socialHoursCount: number;
+      totalHours: number;
+      affectedMembers: {
+        volunteerId: string;
+        volunteerName: string;
+        studentId: string | null;
+        hours: number;
+        approvalStatus: string;
+      }[];
+    }>(`/classes/${id}/delete-impact`),
   /** Finaliza la clase y asigna las horas (durationHours) a cada instructor. */
   complete: (id: string) =>
     fetchApi<{
