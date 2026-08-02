@@ -391,10 +391,14 @@ export class ClassesService {
           : [];
 
       for (const { ci, volunteer } of instructors) {
-        // Evitar duplicados: si el instructor ya tiene una hora con la misma
-        // nota+mismo día, no la volvemos a crear. Heurístico (sin FK directa).
+        // Evitar duplicados: si el instructor ya tiene una hora para esta
+        // clase (mismo classId), no la volvemos a crear. Usamos classId
+        // como clave principal y notes como fallback para horas legacy
+        // (creadas antes de que existiera el campo classId).
         const dup = existingHours.find(
-          (h) => h.volunteerId === ci.volunteerId && h.notes.includes(noteMarker),
+          (h) =>
+            h.volunteerId === ci.volunteerId &&
+            (h.classId === cls.id || h.notes.includes(noteMarker)),
         );
         if (dup) {
           skipped.push({
@@ -406,7 +410,11 @@ export class ClassesService {
 
         await this.fs.create<SocialHourDoc>('socialHours', {
           volunteerId: ci.volunteerId,
-          activityId: null,
+          // activityId referencia el ID de la clase que originó las horas
+          // (las clases no están en la colección `activities`, pero
+          // guardamos el ID aquí para trazabilidad directa desde la consola
+          // de Firebase). `classId` se mantiene como marcador de tipo.
+          activityId: cls.id,
           classId: cls.id,
           hours: hoursToAssign,
           type: 'field', // las clases siempre cuentan como horas de campo

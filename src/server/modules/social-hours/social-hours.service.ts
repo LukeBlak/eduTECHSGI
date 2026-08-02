@@ -94,19 +94,27 @@ export class SocialHoursService {
 
   /**
    * Adjeta `volunteer`, `activity`, `class` y `reviewer` (4-way join manual).
-   * - `activity` se resuelve si `activityId` está seteado.
-   * - `class` se resuelve si `classId` está seteado (horas auto-asignadas
-   *   desde finalizar una clase).
+   *
+   * Regla de resolución de activityId/classId:
+   * - Si `classId` está seteado → la hora proviene de finalizar una clase.
+   *   En este caso `activityId` contiene el ID de la clase (no de una
+   *   activity real), así que NO hacemos lookup en `activities` (devolvería
+   *   null). Sí hacemos lookup en `classes` y lo exponemos como `class`.
+   * - Si solo `activityId` está seteado (sin classId) → la hora está
+   *   vinculada a una actividad real. Lookup normal en `activities`.
    * - `reviewer` es una self-FK a Volunteer (puede ser null si la hora fue
    *   auto-aprobada por sistema o el reviewer fue eliminado).
    */
   private async enrichHour(h: SocialHourDoc) {
+    // Si classId está seteado, activityId referencia una clase (no una
+    // activity), así que omitimos el lookup en `activities`.
+    const lookupActivity = !!h.activityId && !h.classId;
     const [volunteer, activity, cls, reviewer] = await Promise.all([
       h.volunteerId
         ? this.fs.findById<VolunteerDoc>('volunteers', h.volunteerId)
         : Promise.resolve(null),
-      h.activityId
-        ? this.fs.findById<ActivityDoc>('activities', h.activityId)
+      lookupActivity
+        ? this.fs.findById<ActivityDoc>('activities', h.activityId!)
         : Promise.resolve(null),
       h.classId
         ? this.fs.findById<ClassDoc>('classes', h.classId)
@@ -151,6 +159,7 @@ export class SocialHoursService {
     });
 
     const enriched = await this.enrichHour(created);
+    const sourceTitle = enriched.activity?.title || enriched.class?.title;
 
     // Notifica al voluntario.
     void this.notifications.create({
@@ -164,10 +173,10 @@ export class SocialHoursService {
         approvalStatus === 'approved'
           ? `Se te aprobaron ${created.hours} hora(s) social(es) de tipo ${
               created.type === 'admin' ? 'administrativa' : 'de campo'
-            }${enriched.activity ? ` en "${enriched.activity.title}"` : ''}.`
+            }${sourceTitle ? ` en "${sourceTitle}"` : ''}.`
           : `Registraste ${created.hours} hora(s) social(es) de tipo ${
               created.type === 'admin' ? 'administrativa' : 'de campo'
-            }${enriched.activity ? ` en "${enriched.activity.title}"` : ''}. Quedan pendientes de aprobación por un líder/presidente/vice.`,
+            }${sourceTitle ? ` en "${sourceTitle}"` : ''}. Quedan pendientes de aprobación por un líder/presidente/vice.`,
       link: '/horas',
       metadata: {
         hours: created.hours,
@@ -184,7 +193,7 @@ export class SocialHoursService {
         title: `Hora social pendiente de aprobación`,
         message: `${enriched.volunteer?.name ?? 'Un voluntario'} registró ${created.hours}h (${
           created.type === 'admin' ? 'admin' : 'campo'
-        })${enriched.activity ? ` en "${enriched.activity.title}"` : ''}. Revisa y aprueba/rechaza desde la sección Horas Sociales.`,
+        })${sourceTitle ? ` en "${sourceTitle}"` : ''}. Revisa y aprueba/rechaza desde la sección Horas Sociales.`,
         link: '/horas',
         metadata: {
           socialHourId: created.id,
@@ -239,17 +248,22 @@ export class SocialHoursService {
     const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
 
-    // Snapshot previo de volunteer/activity para notificaciones (antes de
-    // cambiar el doc — aunque estos FKs no se tocan aquí, los necesitamos
-    // para el mensaje y para el return shape con includes).
-    const [volunteer, activity] = await Promise.all([
+    // Snapshot previo de volunteer/activity/class para notificaciones.
+    // Si classId está seteado, activityId referencia una clase (no una activity),
+    // así que no buscamos en `activities`.
+    const lookupActivity = !!hour.activityId && !hour.classId;
+    const [volunteer, activity, cls] = await Promise.all([
       hour.volunteerId
         ? this.fs.findById<VolunteerDoc>('volunteers', hour.volunteerId)
         : Promise.resolve(null),
-      hour.activityId
-        ? this.fs.findById<ActivityDoc>('activities', hour.activityId)
+      lookupActivity
+        ? this.fs.findById<ActivityDoc>('activities', hour.activityId!)
+        : Promise.resolve(null),
+      hour.classId
+        ? this.fs.findById<ClassDoc>('classes', hour.classId)
         : Promise.resolve(null),
     ]);
+    const sourceTitle = activity?.title || cls?.title;
 
     await this.fs.update<SocialHourDoc>('socialHours', id, {
       approvalStatus: 'approved',
@@ -261,7 +275,7 @@ export class SocialHoursService {
     const updated = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!updated) throw new Error('Hora social no encontrada tras actualizar');
     const reviewer = await this.fs.findById<VolunteerDoc>('volunteers', reviewerId);
-    const enriched = { ...updated, volunteer, activity, reviewer };
+    const enriched = { ...updated, volunteer, activity, class: cls, reviewer };
 
     // Caso 3: notificar al voluntario que se aprobaron sus horas.
     void this.notifications.create({
@@ -269,7 +283,7 @@ export class SocialHoursService {
       type: 'social_hour',
       title: `¡Horas aprobadas! +${hour.hours}h`,
       message: `Tu registro de ${hour.hours} hora(s) social(es)${
-        activity ? ` en "${activity.title}"` : ''
+        sourceTitle ? ` en "${sourceTitle}"` : ''
       } fue aprobado. Total acumulado revisa tu perfil.`,
       link: '/perfil',
       metadata: { socialHourId: id, hours: hour.hours, approved: true },
@@ -305,14 +319,19 @@ export class SocialHoursService {
     const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
 
-    const [volunteer, activity] = await Promise.all([
+    const lookupActivity = !!hour.activityId && !hour.classId;
+    const [volunteer, activity, cls] = await Promise.all([
       hour.volunteerId
         ? this.fs.findById<VolunteerDoc>('volunteers', hour.volunteerId)
         : Promise.resolve(null),
-      hour.activityId
-        ? this.fs.findById<ActivityDoc>('activities', hour.activityId)
+      lookupActivity
+        ? this.fs.findById<ActivityDoc>('activities', hour.activityId!)
+        : Promise.resolve(null),
+      hour.classId
+        ? this.fs.findById<ClassDoc>('classes', hour.classId)
         : Promise.resolve(null),
     ]);
+    const sourceTitle = activity?.title || cls?.title;
 
     await this.fs.update<SocialHourDoc>('socialHours', id, {
       approvalStatus: 'rejected',
@@ -324,14 +343,14 @@ export class SocialHoursService {
     const updated = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!updated) throw new Error('Hora social no encontrada tras actualizar');
     const reviewer = await this.fs.findById<VolunteerDoc>('volunteers', reviewerId);
-    const enriched = { ...updated, volunteer, activity, reviewer };
+    const enriched = { ...updated, volunteer, activity, class: cls, reviewer };
 
     void this.notifications.create({
       userId: hour.volunteerId,
       type: 'social_hour',
       title: `Horas no aprobadas: ${hour.hours}h`,
       message: `Tu registro de ${hour.hours} hora(s) social(es)${
-        activity ? ` en "${activity.title}"` : ''
+        sourceTitle ? ` en "${sourceTitle}"` : ''
       } no fue aprobado.${reason ? ` Motivo: ${reason}` : ''}`,
       link: '/horas',
       metadata: { socialHourId: id, hours: hour.hours, rejected: true, reason },
