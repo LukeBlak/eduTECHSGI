@@ -332,3 +332,26 @@ Stage Summary:
 - **Fire-and-forget**: el borrado de orphans no bloquea el response de la lista. Los orphans se excluyen del resultado inmediatamente.
 - **Belt-and-suspenders**: class remove() ahora borra por classId Y activityId, protegiendo contra cualquier inconsistencia de datos.
 - **UX**: el usuario verá los orphans desaparecer automáticamente al cargar la página de Horas Sociales (puede requerir un refresh después de que Vercel despliegue).
+
+---
+Task ID: FIX-10
+Agent: main (Z.ai Code)
+Task: Las tarjetas de comité muestran "0 Miembros" / "0 Actividades" / "0 Clases" en el dashboard aunque sí hay miembros asignados.
+
+Work Log:
+- Análisis del screenshot del usuario (VLM): 3 tarjetas de comité (Comunicaciones, Contenido, Logística) cada una con 0 Miembros, 0 Actividades, 0 Clases. Botones "Ver detalle" y "Ver miembros".
+- Root cause: el método `list()` de CommitteesService usaba `this.fs.count('volunteers', { where: { committeeId: c.id } })` para el conteo. La función `count()` de Firestore usa agregación (`q.count().get()`) que puede comportarse distinto a `findAll()` con el mismo `where` en algunos edge cases (indexación, null handling, timing de replicación).
+- El endpoint `members(id)` usa `findAll()` con el mismo where → devuelve resultados. Pero `list()` usa `count()` → devuelve 0. Discrepancia.
+- Fix en committees.service.ts:
+  - `list()`: reemplazado `count()` por `findAll().length` para members, activities y classes. Garantiza consistencia con `members()`.
+  - `create()` y `update()`: mismo cambio (usar findAll en vez de count para el _count.members del retorno).
+- Fix en dashboard.service.ts:
+  - `stats()`: los totales (totalVolunteers, totalCommittees, totalActivities, totalClasses) ahora se derivan de los arrays ya cargados por `findAll()` (volunteers.length, committees.length, etc.) en vez de hacer llamadas separadas a `count()`. Más eficiente (menos round-trips) Y más consistente.
+  - Añadida interfaz `ClassDoc` que faltaba (necesaria para el `findAll<ClassDoc>('classes')` nuevo).
+- Lint: ✅ PASS (0 errores).
+- Commit `b5f3518` pushed a origin/main → Vercel auto-deploy.
+
+Stage Summary:
+- **Root cause**: `count()` (agregación de Firestore) vs `findAll()` (query normal) pueden devolver resultados distintos en algunos edge cases. Esto causaba que los conteos mostraran 0 mientras que los listados reales sí tenían datos.
+- **Fix**: unificado a `findAll().length` en todos los lugares donde se necesitan conteos que deben ser consistentes con los listados. Esto es menos eficiente (trae todos los docs) pero garantiza consistencia. Para colecciones pequeñas (comités, voluntarios de un comité) el overhead es mínimo.
+- **Dashboard optimizado**: al derivar los totales de los arrays ya cargados, se eliminan 4 llamadas separadas a `count()` → menos round-trips a Firestore.
