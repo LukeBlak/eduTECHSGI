@@ -608,6 +608,25 @@ export const activitiesApi = {
     volunteerIds: string[];
   }>) => fetchApi<Activity>(`/activities/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   remove: (id: string) => fetchApi<{ success: boolean }>(`/activities/${id}`, { method: "DELETE" }),
+  /**
+   * Previsualiza el impacto de eliminar una actividad: lista las horas
+   * sociales (con voluntario) que se borrarían automáticamente al
+   * confirmar la eliminación.
+   */
+  deleteImpact: (id: string) =>
+    fetchApi<{
+      activityId: string;
+      title: string;
+      socialHoursCount: number;
+      totalHours: number;
+      affectedMembers: {
+        volunteerId: string;
+        volunteerName: string;
+        studentId: string | null;
+        hours: number;
+        approvalStatus: string;
+      }[];
+    }>(`/activities/${id}/delete-impact`),
   subscribe: (id: string) =>
     fetchApi<{
       success: boolean;

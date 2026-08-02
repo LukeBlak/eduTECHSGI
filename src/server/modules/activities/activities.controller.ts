@@ -67,6 +67,23 @@ export class ActivitiesController {
     }
   }
 
+  /**
+   * GET /api/activities/[id]/delete-impact — previsualiza el impacto de
+   * eliminar la actividad: lista de horas sociales (con voluntario) que
+   * se borrarían automáticamente. El frontend lo usa para mostrar el
+   * diálogo de confirmación con los miembros afectados.
+   */
+  async deleteImpact(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+    try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
+      const { id } = await ctx.params;
+      return ok(await this.service.previewDeleteImpact(id));
+    } catch (e) {
+      return serverError('Error al previsualizar el impacto de eliminación', e);
+    }
+  }
+
   /** POST /api/activities/[id]/subscribe — voluntario se inscribe. */
   async subscribe(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {

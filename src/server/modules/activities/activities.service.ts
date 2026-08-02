@@ -328,13 +328,72 @@ export class ActivitiesService {
     return this.serialize(updatedWithIncludes);
   }
 
+  /**
+   * Previsualiza el impacto de eliminar una actividad: lista las horas
+   * sociales (con voluntario) que se borrarían automáticamente al
+   * confirmar la eliminación. El frontend lo usa para mostrar el diálogo
+   * de confirmación con la lista de miembros afectados.
+   */
+  async previewDeleteImpact(id: string): Promise<{
+    activityId: string;
+    title: string;
+    socialHoursCount: number;
+    totalHours: number;
+    affectedMembers: {
+      volunteerId: string;
+      volunteerName: string;
+      studentId: string | null;
+      hours: number;
+      approvalStatus: string;
+    }[];
+  }> {
+    const act = await this.fs.findById<ActivityDoc>('activities', id);
+    const title = act?.title ?? '(actividad eliminada)';
+    const socialHours = act
+      ? await this.fs.findAll<SocialHourDoc>('socialHours', { where: { activityId: id } })
+      : [];
+
+    // Lookup de voluntarios para resolver nombres.
+    const volunteerIds = [...new Set(socialHours.map((h) => h.volunteerId).filter(Boolean))];
+    const volunteers = await Promise.all(
+      volunteerIds.map((vid) => this.fs.findById<VolunteerDoc>('volunteers', vid)),
+    );
+    const volById = new Map<string, VolunteerDoc>();
+    for (const v of volunteers) {
+      if (v) volById.set(v.id, v);
+    }
+
+    const affectedMembers = socialHours.map((h) => {
+      const v = volById.get(h.volunteerId);
+      return {
+        volunteerId: h.volunteerId,
+        volunteerName: v?.name ?? 'Voluntario',
+        studentId: v?.studentId ?? null,
+        hours: h.hours,
+        approvalStatus: h.approvalStatus,
+      };
+    });
+
+    return {
+      activityId: id,
+      title,
+      socialHoursCount: socialHours.length,
+      totalHours: socialHours.reduce((sum, h) => sum + (h.hours || 0), 0),
+      affectedMembers,
+    };
+  }
+
   async remove(id: string) {
     // Firestore no tiene FK cascade: limpiamos manualmente las relaciones.
     // - activityVolunteers: onDelete: Cascade → borrar
-    // - socialHours.activity / expenses.activity / hourRequests.activity: onDelete: SetNull → desreferenciar
+    // - socialHours:onDelete: Cascade → BORRAR (las horas asociadas a esta
+    //   actividad se eliminan — incluyendo las ya aprobadas). El frontend
+    //   muestra un diálogo de confirmación con la lista de miembros
+    //   afectados antes de llegar aquí (ver previewDeleteImpact).
+    // - expenses / hourRequests: onDelete: SetNull → desreferenciar
     await Promise.all([
       this.fs.deleteMany('activityVolunteers', { where: { activityId: id } }),
-      this.fs.updateMany('socialHours', { where: { activityId: id } }, { activityId: null }),
+      this.fs.deleteMany('socialHours', { where: { activityId: id } }),
       this.fs.updateMany('expenses', { where: { activityId: id } }, { activityId: null }),
       this.fs.updateMany('hourRequests', { where: { activityId: id } }, { activityId: null }),
     ]);
