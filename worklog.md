@@ -260,3 +260,41 @@ Stage Summary:
   4. Toast de confirmación menciona cuántas horas se borraron.
 - **UX**: banner ámbar para alertar, lista con scroll para muchos miembros, badges de estado para transparencia, banner verde cuando no hay impacto.
 - **Seguridad**: endpoint `delete-impact` requiere rol privilegiado (presidente/vice/líder/admin) igual que `remove`.
+
+---
+Task ID: FIX-8
+Agent: main (Z.ai Code)
+Task: Al eliminar una clase, las socialHours auto-asignadas al finalizarla NO se borraban — quedaban huérfanas y aparecían como "asignación manual". Aplicar el mismo fix que se hizo para activities (FIX-7).
+
+Work Log:
+- Root cause confirmada: `classes.service.ts` `remove()` solo hacía:
+    await this.fs.deleteMany('classVolunteers', { where: { classId: id } });
+    await this.fs.remove('classes', id);
+  NO borraba las socialHours con `classId === id`. Esas horas quedaban apuntando a una clase ya inexistente → el enrichHour() no encontraba ni `class` ni `activity` → frontend las mostraba como "asignación manual".
+- Cambios backend (classes.service.ts):
+  - `remove()`: ahora también hace `deleteMany('socialHours', { where: { classId: id } })`. Las horas de clase se identifican por `classId` (marcador de tipo puesto en complete()).
+  - `previewDeleteImpact(id)`: nuevo método — lista socialHours con `classId=this` + lookup de voluntarios (nombre, carné, horas, approvalStatus).
+- Cambios controller (classes.controller.ts): nuevo `deleteImpact()` handler con `requirePrivileged` guard.
+- Nueva ruta: `src/app/api/classes/[id]/delete-impact/route.ts` (GET).
+- Cambios frontend (ClasesSection.tsx):
+  - Estado nuevo: `deleteImpact` + `deleteImpactLoading`.
+  - Handler `handleRequestDelete(c)`: abre diálogo + dispara fetch a `deleteImpact`.
+  - Botón Eliminar ahora llama a `handleRequestDelete` en vez de `setDeleteTarget`.
+  - Diálogo rediseñado (idéntico patrón que ActividadesSection):
+    * Banner ámbar con AlertTriangle: "Esta clase tiene N hora(s) social(es) asignadas que se borrarán automáticamente (incluyendo las ya aprobadas). Total: Xh."
+    * Lista con scroll (max-h-48) de instructores afectados: nombre, carné, badge horas, badge estado (Aprobada/Pendiente/Rechazada).
+    * Banner verde (CheckCircle2) si no hay horas (caso seguro).
+    * Loading state con spinner.
+    * Botón cambió de "Eliminar" a "Sí, eliminar".
+  - `handleDelete`: toast post-eliminación ahora menciona "N hora(s) social(es) borradas" si las había.
+- Cambios api.ts: añadido `classesApi.deleteImpact(id)`.
+- Lint: ✅ PASS (0 errores).
+- Build: ✅ Compila correctamente. Test: `GET /api/classes/test-id/delete-impact` devuelve 403 (esperado sin auth privilegiada — ruta + guard OK).
+- Agent Browser: ✅ página / carga limpia (login screen, sin errores).
+- Commit `9d8f967` pushed a origin/main → Vercel auto-deploy.
+
+Stage Summary:
+- **Bug resuelto**: al eliminar una clase, las socialHours con `classId === id` se BORRAN de Firestore (no quedan huérfanas). Ya no aparecerán como "asignación manual".
+- **UX consistente con activities**: diálogo ámbar con lista de instructores afectados (nombre, carné, horas, estado) antes de confirmar.
+- **Patrón replicable**: si en el futuro se añaden otros orígenes de horas (talleres, eventos, etc.), aplicar el mismo patrón: marcar con un campo `XXXId` en complete(), borrar por ese campo en remove(), exponer previewDeleteImpact.
+- **Nota sobre datos legacy**: las socialHours creadas antes de FIX-5 (que tenían `activityId: null` y solo el marker `[clase:ID]` en notes) NO serán detectadas por el `deleteMany({ where: { classId } })`. Si el usuario ve horas huérfanas de pruebas anteriores, pueden borrarse manualmente desde la consola de Firebase o desde la sección Horas Sociales.
