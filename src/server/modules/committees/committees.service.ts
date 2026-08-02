@@ -62,12 +62,29 @@ export class CommitteesService {
     });
     return Promise.all(
       committees.map(async (c) => {
-        const [members, activities, classes] = await Promise.all([
-          this.fs.count('volunteers', { where: { committeeId: c.id } }),
-          this.fs.count('activities', { where: { committeeId: c.id } }),
-          this.fs.count('classes', { where: { committeeId: c.id } }),
+        // Usamos findAll + .length en vez de count() para garantizar
+        // consistencia con el endpoint members() (que también usa
+        // findAll con el mismo where). count() usa agregación de
+        // Firestore que puede comportarse distinto en algunos casos.
+        const [volunteers, activities, classes] = await Promise.all([
+          this.fs.findAll<VolunteerDoc>('volunteers', {
+            where: { committeeId: c.id },
+          }),
+          this.fs.findAll<ActivityDoc>('activities', {
+            where: { committeeId: c.id },
+          }),
+          this.fs.findAll<ClassDoc>('classes', {
+            where: { committeeId: c.id },
+          }),
         ]);
-        return { ...c, _count: { members, activities, classes } };
+        return {
+          ...c,
+          _count: {
+            members: volunteers.length,
+            activities: activities.length,
+            classes: classes.length,
+          },
+        };
       }),
     );
   }
@@ -105,8 +122,11 @@ export class CommitteesService {
       description: input.description ?? '',
       color: input.color ?? 'emerald',
     });
-    const members = await this.fs.count('volunteers', { where: { committeeId: created.id } });
-    return { ...created, _count: { members } };
+    // Conteo consistente con list() — usar findAll en vez de count().
+    const volunteers = await this.fs.findAll<VolunteerDoc>('volunteers', {
+      where: { committeeId: created.id },
+    });
+    return { ...created, _count: { members: volunteers.length } };
   }
 
   async update(id: string, input: UpdateCommitteeInput) {
@@ -116,8 +136,10 @@ export class CommitteesService {
 
     await this.fs.update<CommitteeDoc>('committees', id, data);
     const updated = await this.fs.findById<CommitteeDoc>('committees', id);
-    const members = await this.fs.count('volunteers', { where: { committeeId: id } });
-    return { ...updated, _count: { members } };
+    const volunteers = await this.fs.findAll<VolunteerDoc>('volunteers', {
+      where: { committeeId: id },
+    });
+    return { ...updated, _count: { members: volunteers.length } };
   }
 
   async remove(id: string) {

@@ -65,6 +65,15 @@ interface ActivityVolunteerDoc {
   createdAt: string;
 }
 
+interface ClassDoc {
+  id: string;
+  title: string;
+  status: 'active' | 'completed';
+  committeeId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface SocialHourDoc {
   id: string;
   volunteerId: string;
@@ -112,32 +121,36 @@ export class DashboardService {
   private readonly fs = inject<FirestoreService>(FIRESTORE_TOKEN);
 
   async stats() {
-    // 1) Conteos + colecciones completas en paralelo (un solo round-trip lógico).
+    // 1) Cargar colecciones completas en paralelo (un solo round-trip lógico).
+    // Los conteos se derivan de los arrays ya cargados (en vez de llamar
+    // count() por separado) para garantizar consistencia: count() usa
+    // agregación de Firestore que puede comportarse distinto a findAll()
+    // en algunos edge cases (p.ej. reglas de indexación, null handling).
     const [
-      totalVolunteers,
-      totalCommittees,
-      totalActivities,
-      totalClasses,
       socialHours,
       incomes,
       expenses,
       volunteers,
       committees,
       activities,
+      classes,
       activityVolunteers,
     ] = await Promise.all([
-      this.fs.count('volunteers'),
-      this.fs.count('committees'),
-      this.fs.count('activities'),
-      this.fs.count('classes'),
       this.fs.findAll<SocialHourDoc>('socialHours'),
       this.fs.findAll<IncomeDoc>('incomes'),
       this.fs.findAll<ExpenseDoc>('expenses'),
       this.fs.findAll<VolunteerDoc>('volunteers'),
       this.fs.findAll<CommitteeDoc>('committees'),
       this.fs.findAll<ActivityDoc>('activities'),
+      this.fs.findAll<ClassDoc>('classes'),
       this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers'),
     ]);
+
+    // Totales derivados de los arrays (consistentes con los listados).
+    const totalVolunteers = volunteers.length;
+    const totalCommittees = committees.length;
+    const totalActivities = activities.length;
+    const totalClasses = classes.length;
 
     // Indexa para lookups O(1) — evita N+1.
     const committeesById = new Map(committees.map((c) => [c.id, c]));
