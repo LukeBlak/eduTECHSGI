@@ -126,3 +126,43 @@ Stage Summary:
   - `src/components/app/sections/HorasSocialesSection.tsx`
   - `src/components/app/sections/PerfilSection.tsx`
   - `src/app/api/reports/ods-project/[projectId]/route.ts` (eliminado)
+
+---
+Task ID: FIX-4
+Agent: main (Z.ai Code)
+Task: Arreglar build de Vercel que fallaba con "Module not found: @prisma/client" tras un push accidental de archivos legacy.
+
+Work Log:
+- Síntoma: Vercel reportaba `Command "next build" exited with 1` con error:
+  `Module not found: Can't resolve '@prisma/client'`
+  Import trace: src/lib/db.ts → prisma.provider.ts → firebase.service.ts → firebase.controller.ts → api/firebase/mock/route.ts
+- Root cause: Al hacer `git commit --amend --reset-author` en FIX-3 (para corregir el email del autor), el amend incluyó accidentalmente 16 archivos legacy que habían quedado staged en el working tree (probablemente agregados por el job programado webDevReview que corrió en paralelo). Estos archivos importan `@prisma/client`, que no está generado en Vercel → build falla.
+- Archivos legacy involucrados (NO se usan — la app usa Firestore via firestore-helpers.ts):
+  - src/lib/db.ts (PrismaClient singleton)
+  - src/server/core/prisma.provider.ts
+  - src/server/modules/firebase/* (módulo de migración Prisma→Firestore)
+  - src/app/api/firebase/* (rutas API del módulo legacy)
+  - src/components/app/sections/FirebaseSection.tsx
+  - prisma/schema.prisma + prisma/migrations/
+- Verificación: `app.module.ts` (en remoto) NO importa el módulo firebase → confirmado que es código muerto.
+- Fix aplicado:
+  1. `git reset --soft e56734b` (volver al commit base del remoto, antes de mis cambios)
+  2. `git reset HEAD -- .` (unstage todo)
+  3. Actualizado `.gitignore` para ignorar explícitamente los archivos legacy:
+     - src/lib/db.ts
+     - src/server/core/prisma.provider.ts
+     - src/server/modules/firebase/
+     - src/app/api/firebase/
+     - src/components/app/sections/FirebaseSection.tsx
+     - prisma/migrations/ y prisma/schema.prisma
+  4. Staged solo los 7 archivos legit (mis fixes + .gitignore + worklog)
+  5. `git commit` con email correcto (212150022+LukeBlak@users.noreply.github.com)
+  6. `git push --force-with-lease` (necesario porque reescribimos el historial)
+- Verificado que no hay imports rotos: las únicas referencias a `PRISMA_TOKEN` en el código del remoto son comentarios documentales en `firestore.provider.ts` y `achievements.service.ts` (no imports reales).
+
+Stage Summary:
+- **Build de Vercel arreglado**: commit `c819cbb` tiene solo 7 archivos legit, 0 archivos legacy que importen `@prisma/client`.
+- **.gitignore ampliado**: ahora ignora explícitamente el código legacy de Prisma/Firebase-migration para que no vuelva a commitearse accidentalmente.
+- **Autor correcto**: LukeBlak <212150022+LukeBlak@users.noreply.github.com> (email noreply oficial de GitHub, reconocido por Vercel).
+- **Sincronizado**: local y remoto en `c819cbb`, force-pushed correctamente.
+- **Lección aprendida**: antes de `git commit --amend`, siempre verificar `git diff --cached --name-only` para asegurar que no haya archivos staged no deseados. El job programado webDevReview puede agregar archivos al staging area en paralelo.
