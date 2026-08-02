@@ -220,3 +220,43 @@ Stage Summary:
 - **Dedup sigue funcionando**: la detección de duplicados usa `h.classId === cls.id` como condición principal (robusta, no depende de texto). El fallback por `notes.includes(noteMarker)` solo aplica a registros legacy.
 - **Trazabilidad intacta**: `activityId` y `classId` siguen guardando el ID de la clase para lookup desde Firebase Console — solo la nota visible al usuario fue limpiada.
 - **Cron job creado**: job 303443, webDevReview cada 15 min (America/El_Salvador) para monitoreo continuo.
+
+---
+Task ID: FIX-7
+Agent: main (Z.ai Code)
+Task: Al eliminar una actividad, mostrar diálogo de confirmación que advierta sobre las horas sociales que se borrarán automáticamente y liste los miembros afectados. Las horas deben borrarse de verdad (no solo desreferenciarse).
+
+Work Log:
+- Análisis del comportamiento actual:
+  - Frontend (ActividadesSection.tsx): diálogo simple "¿Eliminar actividad? Se eliminará permanentemente {title}." — sin advertencia de horas.
+  - Backend (activities.service.ts remove()): usaba `updateMany('socialHours', { activityId: null })` — solo desreferenciaba, las horas quedaban huérfanas y contaban para el voluntario.
+- Cambios backend (activities.service.ts):
+  - Nuevo método `previewDeleteImpact(id)`: lista las socialHours vinculadas + lookup de voluntarios (nombre, carné, horas, approvalStatus).
+  - `remove()`: cambiado de `updateMany` a `deleteMany('socialHours', { where: { activityId: id } })` — ahora BORRA las horas de verdad (incluyendo las aprobadas).
+- Cambios controller (activities.controller.ts):
+  - Nuevo `deleteImpact()` handler con `requirePrivileged` guard.
+- Nueva ruta: `src/app/api/activities/[id]/delete-impact/route.ts` (GET).
+- Cambios frontend (ActividadesSection.tsx):
+  - Estado nuevo: `deleteImpact` (info de horas afectadas) + `deleteImpactLoading`.
+  - Handler `handleRequestDelete(a)`: abre diálogo + dispara fetch a `deleteImpact`.
+  - Diálogo rediseñado:
+    * Banner ámbar con ícono AlertTriangle: "Esta actividad tiene N hora(s) social(es) asignadas que se borrarán automáticamente (incluyendo las ya aprobadas). Total: Xh."
+    * Lista con scroll (max-h-48) de miembros afectados: nombre, carné, badge de horas, badge de estado (Aprobada/Pendiente/Rechazada).
+    * Banner verde (CheckCircle2) si la actividad no tiene horas (caso seguro).
+    * Loading state con spinner mientras carga el preview.
+    * Botón cambió de "Eliminar" a "Sí, eliminar".
+  - `handleDelete`: toast post-eliminación ahora menciona "N hora(s) social(es) borradas" si las había.
+- Cambios api.ts: añadido `activitiesApi.deleteImpact(id)`.
+- Lint: ✅ PASS (0 errores).
+- Build: ✅ Compila correctamente. Test: `GET /api/activities/test-id/delete-impact` devuelve 403 (esperado, sin auth privilegiada — confirma que ruta + guard funcionan).
+- Commit `d8b8d34` pushed a origin/main → Vercel auto-deploy.
+
+Stage Summary:
+- **Comportamiento anterior (bug)**: al eliminar una actividad, las socialHours quedaban huérfanas (activityId=null) pero seguían contando para el voluntario — silenciosamente.
+- **Comportamiento nuevo**: 
+  1. Al hacer clic en Eliminar, el sistema carga el impacto (horas + miembros) y lo muestra en el diálogo.
+  2. El usuario VE qué miembros perderán horas (con nombre, carné, cantidad de horas y estado).
+  3. Si confirma, las horas se BORRAN de Firestore (no se desreferencian).
+  4. Toast de confirmación menciona cuántas horas se borraron.
+- **UX**: banner ámbar para alertar, lista con scroll para muchos miembros, badges de estado para transparencia, banner verde cuando no hay impacto.
+- **Seguridad**: endpoint `delete-impact` requiere rol privilegiado (presidente/vice/líder/admin) igual que `remove`.
