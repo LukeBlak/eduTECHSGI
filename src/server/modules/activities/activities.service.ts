@@ -9,6 +9,7 @@ import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
+import { sanitizeVolunteer } from '@/server/core/sanitize';
 import type { CreateActivityInput, UpdateActivityInput } from './dto/activities.dto';
 
 interface VolunteerDoc {
@@ -821,7 +822,10 @@ export class ActivitiesService {
     return {
       ...a,
       ods: a.ods ? a.ods.split(',').map((s: string) => s.trim()).filter(Boolean) : [],
-      volunteers: (a.volunteers || []).map((av: any) => ({ ...av.volunteer, subscriptionStatus: av.status })),
+      volunteers: (a.volunteers || []).map((av: any) => ({
+        ...sanitizeVolunteer(av.volunteer),
+        subscriptionStatus: av.status,
+      })),
       registeredCount,
       available: a.capacity ? Math.max(0, a.capacity - registeredCount) : null,
       capacityFull: a.capacity !== null && a.capacity !== undefined && registeredCount >= a.capacity,

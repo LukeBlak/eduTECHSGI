@@ -47,8 +47,6 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const verifyRes: VerifyResponse = await authApi.verify();
       if (verifyRes.valid && verifyRes.user) {
-        // verify only returns JWT payload — fetch full user via volunteers list lookup is overkill.
-        // Construct a minimal user object from the JWT payload (sufficient for UI chrome).
         const jwtUser = verifyRes.user;
         set({
           token,
@@ -66,11 +64,15 @@ export const useAuthStore = create<AuthState>((set) => ({
           },
         });
         // Refetch full volunteer info in the background to enrich the user object.
+        // Usamos volunteersApi.get(userId) en vez de list() — get() requiere solo
+        // auth (no privilegio), mientras que list() expone todos los voluntarios.
         try {
-          const volunteers = await volunteersApi.list();
-          const me = volunteers.find((v) => v.id === jwtUser.userId);
+          const me = await volunteersApi.get(jwtUser.userId);
           if (me) {
-            set({ user: me });
+            // Strip password si viniera incluido (defensivo — el backend ya
+            // sanitiza, pero no confiamos ciegamente).
+            const { password: _pw, ...meSafe } = me as { password?: string };
+            set({ user: meSafe as AuthUser });
           }
         } catch {
           /* ignore — keep minimal user */

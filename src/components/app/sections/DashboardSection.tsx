@@ -1376,7 +1376,7 @@ function VolunteerDashboard({
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">
-                      {r.activity?.title || "Registro manual"}
+                      {r.activity?.title || r.class?.title || "Registro manual"}
                     </p>
                     <p className="text-xs text-muted-foreground truncate">
                       {formatDate(r.date)}

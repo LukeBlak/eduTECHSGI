@@ -9,6 +9,7 @@ import { inject, Injectable } from '@/server/core/container';
 import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
+import { sanitizeVolunteer } from '@/server/core/sanitize';
 import type { CreateVolunteerInput, UpdateVolunteerInput } from './dto/volunteers.dto';
 
 /** Tipo del voluntario tal como se almacena en Firestore. */
@@ -120,7 +121,7 @@ export class VolunteersService {
         if (v.committeeId) {
           committee = await this.fs.findById<CommitteeDoc>('committees', v.committeeId);
         }
-        return { ...v, committee };
+        return { ...sanitizeVolunteer(v)!, committee };
       }),
     );
   }
@@ -177,7 +178,7 @@ export class VolunteersService {
       ]);
 
     return {
-      ...v,
+      ...sanitizeVolunteer(v)!,
       committee,
       socialHours: socialHoursWithActivity,
       activityLinks: activityLinksWithActivity,
@@ -190,18 +191,24 @@ export class VolunteersService {
       where: { volunteerId: id },
       orderBy: { field: 'date', direction: 'desc' },
     });
-    // Embed activity (para el reporte por actividad y para `records`).
-    const hoursWithActivity = await Promise.all(
+    // Embed activity y class (para el reporte por actividad y para `records`).
+    // Si classId está seteado, activityId referencia una clase (no una activity
+    // real), así que omitimos el lookup de activity en ese caso.
+    const hoursWithRelations = await Promise.all(
       hours.map(async (h) => {
-        let activity: ActivityDoc | null = null;
-        if (h.activityId) {
-          activity = await this.fs.findById<ActivityDoc>('activities', h.activityId);
-        }
-        return { ...h, activity };
+        const [activity, cls] = await Promise.all([
+          h.activityId && !h.classId
+            ? this.fs.findById<ActivityDoc>('activities', h.activityId)
+            : Promise.resolve(null),
+          h.classId
+            ? this.fs.findById<ClassDoc>('classes', h.classId)
+            : Promise.resolve(null),
+        ]);
+        return { ...h, activity, class: cls };
       }),
     );
     // Solo cuentan las horas aprobadas para los totales.
-    const approvedHours = hoursWithActivity.filter((h) => h.approvalStatus === 'approved');
+    const approvedHours = hoursWithRelations.filter((h) => h.approvalStatus === 'approved');
     const adminHours = approvedHours
       .filter((h) => h.type === 'admin')
       .reduce((s, h) => s + h.hours, 0);
@@ -211,7 +218,7 @@ export class VolunteersService {
     const byActivity = new Map<string, { title: string; hours: number; type: string }>();
     for (const h of approvedHours) {
       const key = h.activityId ?? 'manual';
-      const title = h.activity?.title ?? 'Registro manual';
+      const title = h.activity?.title ?? h.class?.title ?? 'Registro manual';
       const prev = byActivity.get(key) ?? { title, hours: 0, type: h.type };
       prev.hours += h.hours;
       byActivity.set(key, prev);
@@ -220,13 +227,13 @@ export class VolunteersService {
       totalHours: adminHours + fieldHours,
       adminHours,
       fieldHours,
-      pendingHours: hoursWithActivity
+      pendingHours: hoursWithRelations
         .filter((h) => h.approvalStatus === 'pending')
         .reduce((s, h) => s + h.hours, 0),
-      rejectedHours: hoursWithActivity
+      rejectedHours: hoursWithRelations
         .filter((h) => h.approvalStatus === 'rejected')
         .reduce((s, h) => s + h.hours, 0),
-      records: hoursWithActivity,
+      records: hoursWithRelations,
       byActivity: Array.from(byActivity.entries()).map(([activityId, val]) => ({
         activityId,
         title: val.title,
@@ -261,7 +268,7 @@ export class VolunteersService {
     if (created.committeeId) {
       committee = await this.fs.findById<CommitteeDoc>('committees', created.committeeId);
     }
-    const createdWithCommittee = { ...created, committee };
+    const createdWithCommittee = { ...sanitizeVolunteer(created)!, committee };
 
     // Notifica a los admins sobre el nuevo voluntario.
     void this.notifications.notifyAdmins({
@@ -321,7 +328,7 @@ export class VolunteersService {
     if (updated?.committeeId) {
       committee = await this.fs.findById<CommitteeDoc>('committees', updated.committeeId);
     }
-    const updatedWithCommittee = { ...updated, committee };
+    const updatedWithCommittee = { ...sanitizeVolunteer(updated)!, committee };
 
     // Caso: "Al modificar algo de su cuenta" — notificar al propio usuario.
     // Solo si cambió algo sustantivo (no notificamos cambios menores).

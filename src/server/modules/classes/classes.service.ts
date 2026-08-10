@@ -9,6 +9,7 @@ import { inject, Injectable } from '@/server/core/container';
 import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.provider';
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
+import { sanitizeVolunteer } from '@/server/core/sanitize';
 import type { CreateClassInput, UpdateClassInput } from './dto/classes.dto';
 
 /** Resultado de finalizar una clase. */
@@ -130,7 +131,7 @@ export class ClassesService {
     // Mantiene el shape de Prisma: { ...volunteer, role }
     const instructors = instructorsRaw
       .filter((x) => x.volunteer !== null)
-      .map((x) => ({ ...(x.volunteer as VolunteerDoc), role: x.ci.role }));
+      .map((x) => ({ ...sanitizeVolunteer(x.volunteer)!, role: x.ci.role }));
     return { ...c, committee, instructors };
   }
 

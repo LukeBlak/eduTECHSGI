@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { inject, Injectable } from '@/server/core/container';
-import { ok, badRequest, notFound, serverError } from '@/server/core/http';
+import { ok, badRequest, notFound, serverError, forbidden, unauthorized } from '@/server/core/http';
+import { requireAuth, requirePrivileged } from '@/server/core/auth.guard';
+import { sanitizeVolunteer } from '@/server/core/sanitize';
 import { CommitteesService } from './committees.service';
 import { CreateCommitteeDto, UpdateCommitteeDto } from './dto/committees.dto';
 
@@ -8,16 +10,20 @@ import { CreateCommitteeDto, UpdateCommitteeDto } from './dto/committees.dto';
 export class CommitteesController {
   private readonly service = inject(CommitteesService);
 
-  async list() {
+  async list(req: NextRequest) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       return ok(await this.service.list());
     } catch (e) {
       return serverError('Error al listar comités', e);
     }
   }
 
-  async getById(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  async getById(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const { id } = await ctx.params;
       const c = await this.service.getById(id);
       if (!c) return notFound('Comité no encontrado');
@@ -27,10 +33,14 @@ export class CommitteesController {
     }
   }
 
-  async members(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  async members(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const { id } = await ctx.params;
-      return ok(await this.service.members(id));
+      const members = await this.service.members(id);
+      // Sanitizar: nunca exponer hashes de password.
+      return ok(members.map((m) => sanitizeVolunteer(m)!));
     } catch (e) {
       return serverError('Error al obtener miembros', e);
     }
@@ -38,6 +48,8 @@ export class CommitteesController {
 
   async create(req: NextRequest) {
     try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
       const body = await req.json();
       const parsed = CreateCommitteeDto.safeParse(body);
       if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? 'Datos inválidos');
@@ -49,6 +61,8 @@ export class CommitteesController {
 
   async update(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
       const { id } = await ctx.params;
       const body = await req.json();
       const parsed = UpdateCommitteeDto.safeParse(body);
@@ -59,8 +73,10 @@ export class CommitteesController {
     }
   }
 
-  async remove(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  async remove(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
       const { id } = await ctx.params;
       return ok(await this.service.remove(id));
     } catch (e) {

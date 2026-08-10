@@ -12,6 +12,7 @@ import { FIRESTORE_TOKEN, type FirestoreService } from '@/server/core/firestore.
 import { NotificationsService } from '@/server/modules/notifications/notifications.service';
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
 import { canApproveHours } from '@/server/core/auth.guard';
+import { sanitizeVolunteer } from '@/server/core/sanitize';
 import type { Role } from '@/server/core/jwt.util';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
 import type { CreateSocialHourInput, UpdateSocialHourInput } from './dto/social-hours.dto';
@@ -123,7 +124,7 @@ export class SocialHoursService {
         ? this.fs.findById<VolunteerDoc>('volunteers', h.reviewerId)
         : Promise.resolve(null),
     ]);
-    return { ...h, volunteer, activity, class: cls, reviewer };
+    return { ...h, volunteer: sanitizeVolunteer(volunteer), class: cls, reviewer: sanitizeVolunteer(reviewer) };
   }
 
   async list(volunteerId?: string, filters: { approvalStatus?: string } = {}) {
@@ -198,8 +199,14 @@ export class SocialHoursService {
     const approver = canApproveHours(creatorRole);
     const approvalStatus: 'pending' | 'approved' = input.pendingApproval && !approver ? 'pending' : 'approved';
 
+    // IDOR fix: un voluntario (no approver) solo puede crear horas PARA SÍ MISMO.
+    // Ignoramos el volunteerId del body y forzamos el del creador.
+    // Los approvers (admin/líder/presidente/vice) sí pueden crear horas para
+    // cualquier voluntario.
+    const volunteerId = approver ? input.volunteerId : (creatorId ?? input.volunteerId);
+
     const created = await this.fs.create<SocialHourDoc>('socialHours', {
-      volunteerId: input.volunteerId,
+      volunteerId,
       activityId: input.activityId || null,
       hours: input.hours,
       type: input.type,
@@ -300,6 +307,15 @@ export class SocialHoursService {
     const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
 
+    // Status guard: no se puede aprobar una hora que ya fue procesada
+    // (aprobada o rechazada). Previene doble aprobación y reversiones
+    // silenciosas.
+    if (hour.approvalStatus !== 'pending') {
+      throw new Error(
+        `No se puede aprobar: la hora ya está ${hour.approvalStatus === 'approved' ? 'aprobada' : 'rechazada'}`,
+      );
+    }
+
     // Snapshot previo de volunteer/activity/class para notificaciones.
     // Si classId está seteado, activityId referencia una clase (no una activity),
     // así que no buscamos en `activities`.
@@ -370,6 +386,13 @@ export class SocialHoursService {
   async reject(id: string, reviewerId: string, reason: string = '') {
     const hour = await this.fs.findById<SocialHourDoc>('socialHours', id);
     if (!hour) throw new Error('Hora social no encontrada');
+
+    // Status guard: no se puede rechazar una hora que ya fue procesada.
+    if (hour.approvalStatus !== 'pending') {
+      throw new Error(
+        `No se puede rechazar: la hora ya está ${hour.approvalStatus === 'approved' ? 'aprobada' : 'rechazada'}`,
+      );
+    }
 
     const lookupActivity = !!hour.activityId && !hour.classId;
     const [volunteer, activity, cls] = await Promise.all([

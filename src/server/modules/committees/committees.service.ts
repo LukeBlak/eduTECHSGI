@@ -145,7 +145,17 @@ export class CommitteesService {
   async remove(id: string) {
     // Desvincula miembros (committeeId = null) y elimina el comité.
     // Firestore no tiene FK cascade — la desvinculación es manual.
-    await this.fs.updateMany('volunteers', { where: { committeeId: id } }, { committeeId: null });
+    //
+    // Cascade completo:
+    // - volunteers.committeeId → null (SetNull)
+    // - activities.committeeId → null (SetNull)
+    // - classes.committeeId → null (SetNull)
+    // Las activities/classes no se borran — solo se desvinculan del comité.
+    await Promise.all([
+      this.fs.updateMany('volunteers', { where: { committeeId: id } }, { committeeId: null }),
+      this.fs.updateMany('activities', { where: { committeeId: id } }, { committeeId: null }),
+      this.fs.updateMany('classes', { where: { committeeId: id } }, { committeeId: null }),
+    ]);
     await this.fs.remove('committees', id);
     return { success: true };
   }

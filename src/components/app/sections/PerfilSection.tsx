@@ -520,7 +520,15 @@ export function PerfilSection() {
             <div className="flex-1 min-w-0 sm:pb-2">
               <h3 className="text-xl font-bold tracking-tight truncate">{volunteer.name}</h3>
               <p className="text-sm text-muted-foreground">
-                {volunteer.role === "admin" ? "Administrador" : "Voluntario"}
+                {(
+                  {
+                    admin: "Administrador",
+                    volunteer: "Voluntario",
+                    committee_leader: "Líder de Comité",
+                    president: "Presidente",
+                    vice_president: "Vicepresidente",
+                  } as Record<string, string>
+                )[volunteer.role] ?? "Voluntario"}
                 {myCommittee && ` · ${myCommittee.name}`}
               </p>
             </div>
