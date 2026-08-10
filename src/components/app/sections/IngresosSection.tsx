@@ -91,6 +91,7 @@ export function IngresosSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Income | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Income | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function load() {
@@ -114,13 +115,16 @@ export function IngresosSection() {
   }, []);
 
   async function handleDelete(i: Income) {
+    setDeleting(true);
     try {
       await incomeApi.remove(i.id);
       toast.success("Ingreso eliminado");
       setDeleteTarget(null);
       load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -456,11 +460,13 @@ export function IngresosSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>

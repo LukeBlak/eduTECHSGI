@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { inject, Injectable } from '@/server/core/container';
 import { ok, badRequest, notFound, serverError, unauthorized, forbidden } from '@/server/core/http';
-import { getUserFromRequest, requireAuth, requirePrivileged } from '@/server/core/auth.guard';
+import { requireAuth, requirePrivileged } from '@/server/core/auth.guard';
 import { ActivitiesService } from './activities.service';
 import { CreateActivityDto, UpdateActivityDto } from './dto/activities.dto';
 
@@ -9,16 +9,20 @@ import { CreateActivityDto, UpdateActivityDto } from './dto/activities.dto';
 export class ActivitiesController {
   private readonly service = inject(ActivitiesService);
 
-  async list() {
+  async list(req: NextRequest) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       return ok(await this.service.list());
     } catch (e) {
       return serverError('Error al listar actividades', e);
     }
   }
 
-  async getById(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  async getById(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const { id } = await ctx.params;
       const a = await this.service.getById(id);
       if (!a) return notFound('Actividad no encontrada');

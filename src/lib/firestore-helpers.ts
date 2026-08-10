@@ -357,6 +357,50 @@ export function batch(): WriteBatch {
   return fs.batch();
 }
 
+/**
+ * Atomic claim: transaccionalmente lee un doc y, si cumple el predicate,
+ * aplica `update`. Retorna el doc actual (pre-update) y un flag `claimed`.
+ *
+ * Uso típico: prevenir doble-Complete de una actividad/clase.
+ *
+ *   const { claimed } = await atomicClaim('activities', id,
+ *     (doc) => doc?.status === 'active',
+ *     { status: 'completed', completedAt: now });
+ *   if (!claimed) return alreadyCompleted;
+ *
+ * La transacción de Firestore garantiza que dos calls concurrentes solo
+ * una vera `status === 'active'` y aplicará el update; la otra vera
+ * `status === 'completed'` (post-update de la primera) y claim=false.
+ */
+export async function atomicClaim<T = DocumentData>(
+  collection: CollectionName,
+  id: string,
+  predicate: (doc: (T & { id: string }) | null) => boolean,
+  update: Partial<T>,
+): Promise<{ claimed: boolean; doc: (T & { id: string }) | null }> {
+  const fs = requireFs();
+  const ref = fs.collection(COLLECTIONS[collection]).doc(id);
+  let claimed = false;
+  let result: (T & { id: string }) | null = null;
+
+  await fs.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) {
+      result = null;
+      return;
+    }
+    const doc = { id: snap.id, ...(snap.data() as T) };
+    result = doc;
+    if (predicate(doc)) {
+      const nowIso = new Date().toISOString();
+      tx.set(ref, { ...update, updatedAt: nowIso }, { merge: true });
+      claimed = true;
+    }
+  });
+
+  return { claimed, doc: result };
+}
+
 /* ─── UTILIDADES DE TIEMPO ──────────────────────────────────────── */
 
 /** Convierte un Date a ISO string (para almacenar). */

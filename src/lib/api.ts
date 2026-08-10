@@ -1107,7 +1107,15 @@ export function formatCurrency(amount: number): string {
 export function formatDate(date?: string): string {
   if (!date) return "—";
   try {
-    const d = new Date(date);
+    // QA-D-01: Fix timezone bug for date-only ISO strings. Cuando el
+    // backend guarda "2025-08-15", `new Date(...)` lo interpreta como
+    // UTC midnight y en zonas horarias detrás de UTC se muestra como
+    // el día anterior. Si es date-only, construir con constructor local.
+    const trimmed = date.trim();
+    const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    const d = dateOnlyMatch
+      ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+      : new Date(trimmed);
     if (isNaN(d.getTime())) return date;
     return new Intl.DateTimeFormat("es-SV", {
       day: "2-digit",

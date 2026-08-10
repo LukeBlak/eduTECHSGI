@@ -388,8 +388,16 @@ export class ClassesService {
    * se crean sin activityId (solo con notes mencionando la clase).
    */
   async complete(classId: string, reviewerId: string): Promise<CompleteClassResult> {
-    const cls = await this.fs.findById<ClassDoc>('classes', classId);
-    if (!cls) {
+    // QA-B-05: Atomic claim — si la clase ya fue completada por otra
+    // llamada concurrente, abortamos sin asignar horas dobles.
+    const { claimed, doc: claimedDoc } = await this.fs.atomicClaim<ClassDoc>(
+      'classes',
+      classId,
+      (d) => !!d && d.status === 'active',
+      { status: 'completed', completedAt: new Date().toISOString() },
+    );
+
+    if (!claimedDoc) {
       return {
         success: false,
         message: 'Clase no encontrada',
@@ -402,18 +410,21 @@ export class ClassesService {
       };
     }
 
-    if (cls.status === 'completed') {
+    if (!claimed) {
+      // Otra llamada concurrente ganó la carrera → ya está completada.
       return {
         success: false,
         message: 'La clase ya fue finalizada anteriormente',
         classId,
-        title: cls.title,
-        hoursPerInstructor: cls.durationHours,
+        title: claimedDoc.title,
+        hoursPerInstructor: claimedDoc.durationHours,
         assignedCount: 0,
         skipped: [],
         alreadyCompleted: true,
       };
     }
+
+    const cls = claimedDoc;
 
     // Lookup de instructores con su volunteer embebido (para notificaciones).
     // Dedup por volunteerId: si por un bug previo quedaron docs gemelos en
@@ -513,11 +524,9 @@ export class ClassesService {
       }
     }
 
-    // Marcar la clase como completada
-    await this.fs.update<ClassDoc>('classes', classId, {
-      status: 'completed',
-      completedAt: new Date().toISOString(),
-    });
+    // La clase ya fue marcada como 'completed' atómicamente en el
+    // atomicClaim al inicio de complete() — no es necesario un segundo
+    // update aquí (QA-B-05).
 
     // Notificar a cada instructor con horas asignadas
     void this.notifications.createMany(

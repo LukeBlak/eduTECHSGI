@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -109,6 +110,7 @@ export function HorasSocialesSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<SocialHour | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SocialHour | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Pending review (privileged)
@@ -178,6 +180,10 @@ export function HorasSocialesSection() {
     loadPending();
   }, [privileged]);
 
+  // QA-D-13: debounce del input de búsqueda para evitar recalcular el
+  // filter en cada keystroke.
+  const debouncedSearch = useDebouncedValue(searchTerm, 200);
+
   const filtered = useMemo(() => {
     let list = hours;
     if (volunteerFilter !== "all") {
@@ -194,7 +200,7 @@ export function HorasSocialesSection() {
     }
     const norm = (s: string) =>
       s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    const q = norm(searchTerm.trim());
+    const q = norm(debouncedSearch.trim());
     if (q) {
       list = list.filter((h) => {
         const volName = norm(
@@ -217,7 +223,7 @@ export function HorasSocialesSection() {
     typeFilter,
     fromDate,
     toDate,
-    searchTerm,
+    debouncedSearch,
     volunteers,
     activities,
   ]);
@@ -277,14 +283,17 @@ export function HorasSocialesSection() {
     h.activity?.title || h.class?.title || actTitle(h.activityId);
 
   async function handleDelete(h: SocialHour) {
+    setDeleting(true);
     try {
       await socialHoursApi.remove(h.id);
       toast.success("Registro eliminado");
       setDeleteTarget(null);
       loadAll();
       loadPending();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -836,11 +845,13 @@ export function HorasSocialesSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>

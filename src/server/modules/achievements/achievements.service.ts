@@ -278,14 +278,18 @@ export class AchievementsService {
     const achievement = await this.fs.findById<AchievementDoc>('achievements', achievementId);
     if (!achievement) throw new Error('Logro no encontrado');
 
-    // upsert: si ya lo tenía, no falla — solo actualiza notas y fecha.
-    // Firestore no tiene upsert nativo: findOne + create/update.
-    const existing = await this.fs.findOne<VolunteerAchievementDoc>('volunteerAchievements', {
-      volunteerId,
-      achievementId,
-    });
+    // QA-B-14: usar ID compuesto `${volunteerId}_${achievementId}` para que
+    // dos grants concurrentes no creen docs duplicados. El findOne sigue
+    // sirviendo para distinguir "ya lo tenía" (update) vs "es nuevo" (create),
+    // pero el ID compuesto es la defensa atómica contra la race condition.
+    const compoundId = `${volunteerId}_${achievementId}`;
+    const existing = await this.fs.findById<VolunteerAchievementDoc>(
+      'volunteerAchievements',
+      compoundId,
+    );
 
     let va: VolunteerAchievementDoc;
+    let isNew = false;
     if (existing) {
       const updateData: Record<string, unknown> = {
         automatic: false,
@@ -299,13 +303,19 @@ export class AchievementsService {
       );
       va = refreshed as VolunteerAchievementDoc;
     } else {
-      va = await this.fs.create<VolunteerAchievementDoc>('volunteerAchievements', {
-        volunteerId,
-        achievementId,
-        automatic: false,
-        grantedById,
-        notes,
-      });
+      // QA-B-14: ID compuesto previene duplicate grants bajo concurrencia.
+      va = await this.fs.create<VolunteerAchievementDoc>(
+        'volunteerAchievements',
+        {
+          volunteerId,
+          achievementId,
+          automatic: false,
+          grantedById,
+          notes,
+        },
+        compoundId,
+      );
+      isNew = true;
     }
 
     // Enriquecer con achievement + volunteer para preservar el `include` de Prisma.
@@ -315,41 +325,45 @@ export class AchievementsService {
       grantedBy: false,
     });
 
-    // Notificar al voluntario.
-    void this.notifications.create({
-      userId: volunteerId,
-      type: 'system',
-      title: `¡Nuevo logro desbloqueado! ${achievement.name}`,
-      message: `El equipo de EduTECH ESEN te ha otorgado el logro "${achievement.name}"${
-        achievement.points > 0 ? ` (+${achievement.points} pts)` : ''
-      }.${notes ? ` Nota: ${notes}` : ''}`,
-      link: '/logros',
-      metadata: {
+    // Notificar al voluntario (solo si es un grant nuevo — QA-B-14: evita
+    // spam de notificaciones en re-grants idempotentes).
+    if (isNew) {
+      void this.notifications.create({
+        userId: volunteerId,
+        type: 'system',
+        title: `¡Nuevo logro desbloqueado! ${achievement.name}`,
+        message: `El equipo de EduTECH ESEN te ha otorgado el logro "${achievement.name}"${
+          achievement.points > 0 ? ` (+${achievement.points} pts)` : ''
+        }.${notes ? ` Nota: ${notes}` : ''}`,
+        link: '/logros',
+        metadata: {
+          achievementId,
+          achievementName: achievement.name,
+          tier: achievement.tier,
+          points: achievement.points,
+          manual: true,
+        },
+      });
+      void realtime.emit(REALTIME_EVENTS.ACHIEVEMENT_GRANTED, {
         achievementId,
-        achievementName: achievement.name,
-        tier: achievement.tier,
-        points: achievement.points,
+        volunteerId,
         manual: true,
-      },
-    });
-
-    void realtime.emit(REALTIME_EVENTS.ACHIEVEMENT_GRANTED, {
-      achievementId,
-      volunteerId,
-      manual: true,
-    });
-    void realtime.emitToUser(volunteerId, 'achievement:granted', { achievementId });
-    void realtime.refreshDashboard({ reason: 'achievement:granted' });
+      });
+      void realtime.emitToUser(volunteerId, 'achievement:granted', { achievementId });
+      void realtime.refreshDashboard({ reason: 'achievement:granted' });
+    }
 
     return vaWithIncludes;
   }
 
   /** Revoca un logro previamente otorgado a un voluntario (manual o automático). */
   async revoke(achievementId: string, volunteerId: string) {
-    const existing = await this.fs.findOne<VolunteerAchievementDoc>('volunteerAchievements', {
-      volunteerId,
-      achievementId,
-    });
+    // QA-B-14: usar ID compuesto para encontrar el doc directamente.
+    const compoundId = `${volunteerId}_${achievementId}`;
+    const existing = await this.fs.findById<VolunteerAchievementDoc>(
+      'volunteerAchievements',
+      compoundId,
+    );
     if (!existing) {
       // Si no existía, no es un error — idempotente.
       return { success: true, existed: false };
@@ -523,20 +537,25 @@ export class AchievementsService {
     const granted: VolunteerAchievementDoc[] = [];
 
     for (const ach of autoAchievements) {
-      // volunteerAchievement.findUnique por compound key (volunteerId+achievementId).
-      const already = await this.fs.findOne<VolunteerAchievementDoc>('volunteerAchievements', {
-        volunteerId,
-        achievementId: ach.id,
-      });
+      // QA-B-14: usar ID compuesto para prevenir duplicate grants.
+      const compoundId = `${volunteerId}_${ach.id}`;
+      const already = await this.fs.findById<VolunteerAchievementDoc>(
+        'volunteerAchievements',
+        compoundId,
+      );
       if (already) continue;
 
       if (this.meetsAutoCriteria(ach.autoType, ach.autoThreshold, metrics)) {
-        const va = await this.fs.create<VolunteerAchievementDoc>('volunteerAchievements', {
-          volunteerId,
-          achievementId: ach.id,
-          automatic: true,
-          notes: '',
-        });
+        const va = await this.fs.create<VolunteerAchievementDoc>(
+          'volunteerAchievements',
+          {
+            volunteerId,
+            achievementId: ach.id,
+            automatic: true,
+            notes: '',
+          },
+          compoundId,
+        );
         // Prisma devolvía con `include: { achievement, volunteer }`.
         const vaWithIncludes = await this.enrichGrant(va, {
           achievement: true,
@@ -592,20 +611,24 @@ export class AchievementsService {
       try {
         const metrics = await this.computeMetrics(v.id);
         if (this.meetsAutoCriteria(achievement.autoType, achievement.autoThreshold, metrics)) {
-          // upsert idempotente: solo crear si no existe (preserva el `update: {}`
-          // no-op del original Prisma).
-          const existing = await this.fs.findOne<VolunteerAchievementDoc>('volunteerAchievements', {
-            volunteerId: v.id,
-            achievementId,
-          });
+          // QA-B-14: usar ID compuesto para prevenir duplicate grants.
+          const compoundId = `${v.id}_${achievementId}`;
+          const existing = await this.fs.findById<VolunteerAchievementDoc>(
+            'volunteerAchievements',
+            compoundId,
+          );
           if (existing) continue;
 
-          await this.fs.create<VolunteerAchievementDoc>('volunteerAchievements', {
-            volunteerId: v.id,
-            achievementId,
-            automatic: true,
-            notes: '',
-          });
+          await this.fs.create<VolunteerAchievementDoc>(
+            'volunteerAchievements',
+            {
+              volunteerId: v.id,
+              achievementId,
+              automatic: true,
+              notes: '',
+            },
+            compoundId,
+          );
           granted++;
           void this.notifications.create({
             userId: v.id,

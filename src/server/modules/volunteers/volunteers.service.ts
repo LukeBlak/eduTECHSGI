@@ -249,7 +249,21 @@ export class VolunteersService {
     });
     if (existing) throw new Error('Ya existe un voluntario con este carnet');
 
-    const password = input.password ?? 'voluntario123';
+    // Email uniqueness (QA-A-03): si se proporcionó un email no vacío, verificar
+    // que no exista ya otro voluntario con el mismo email.
+    const email = (input.email ?? '').trim().toLowerCase();
+    if (email) {
+      const existingEmail = await this.fs.findOne<VolunteerDoc>('volunteers', {
+        email,
+      });
+      if (existingEmail) {
+        throw new Error('Ya existe un voluntario con este correo electrónico');
+      }
+    }
+
+    // Generar contraseña aleatoria si no se proporcionó (QA-A-02: evita el
+    // default débil 'voluntario123' que era fácil de adivinar).
+    const password = input.password ?? generateTempPassword();
     const hashed = await bcrypt.hash(password, 10);
 
     const created = await this.fs.create<VolunteerDoc>('volunteers', {
@@ -258,7 +272,7 @@ export class VolunteersService {
       career: input.career,
       committeeId: input.committeeId || null,
       role: input.role,
-      email: input.email ?? '',
+      email,
       phone: input.phone ?? '',
       password: hashed,
     });
@@ -312,11 +326,27 @@ export class VolunteersService {
     if (input.password) {
       data.password = await bcrypt.hash(input.password, 10);
     }
-    if (input.committeeId === null || input.committeeId === undefined) {
-      // keep — no actualizar el committeeId
+    // QA-B-15: distinguir `undefined` (no cambiar) de `null` (remover del comité).
+    if (input.committeeId === undefined) {
+      // El caller no envió committeeId → mantener el valor actual.
       delete data.committeeId;
     } else {
+      // null explícito o string vacío → remover del comité.
+      // string no vacío → asignar a ese comité.
       data.committeeId = input.committeeId || null;
+    }
+    // Email uniqueness (QA-A-03) en update.
+    if (input.email !== undefined) {
+      const newEmail = input.email.trim().toLowerCase();
+      if (newEmail && newEmail !== (before.email ?? '').toLowerCase()) {
+        const clash = await this.fs.findOne<VolunteerDoc>('volunteers', {
+          email: newEmail,
+        });
+        if (clash && clash.id !== id) {
+          throw new Error('Ya existe otro voluntario con este correo electrónico');
+        }
+      }
+      data.email = newEmail;
     }
     // Firestore no acepta `undefined` en los payloads — limpiar.
     Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
@@ -382,8 +412,18 @@ export class VolunteersService {
       this.fs.deleteMany('classVolunteers', { where: { volunteerId: id } }),
       this.fs.deleteMany('socialHours', { where: { volunteerId: id } }),
       this.fs.deleteMany('notifications', { where: { userId: id } }),
-      // SetNull: el voluntario era reviewer de horas/solicitudes; lo desreferenciamos.
+      // QA-B-01: cascade incompleto — faltaba borrar hourRequests y
+      // volunteerAchievements del voluntario eliminado. Esto dejaba docs
+      // huérfanos que apuntaban a un volunteerId inexistente.
+      this.fs.deleteMany('hourRequests', { where: { volunteerId: id } }),
+      this.fs.deleteMany('volunteerAchievements', { where: { volunteerId: id } }),
+      // SetNull: el voluntario era reviewer/grantedBy de horas/logros;
+      // lo desreferenciamos para no mostrar un ID inválido en la UI.
       this.fs.updateMany('socialHours', { where: { reviewerId: id } }, { reviewerId: null }),
+      this.fs.updateMany('hourRequests', { where: { reviewerId: id } }, { reviewerId: null }),
+      this.fs.updateMany('volunteerAchievements', { where: { grantedById: id } }, {
+        grantedById: null,
+      }),
     ]);
     await this.fs.remove('volunteers', id);
 
@@ -391,4 +431,26 @@ export class VolunteersService {
     void realtime.refreshDashboard({ reason: 'volunteer:deleted' });
     return { success: true };
   }
+}
+
+/**
+ * Genera una contraseña temporal aleatoria de 10 caracteres para nuevas
+ * cuentas cuando el admin no especifica una explícitamente.
+ * Formato: 4 letras + 4 dígitos + 2 símbolos (fácil de comunicar, difícil
+ * de adivinar).
+ */
+function generateTempPassword(): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%';
+  const pick = (s: string, n: number) =>
+    Array.from({ length: n }, () => s[Math.floor(Math.random() * s.length)]).join('');
+  // Mezclar para que no sea siempre letra+letra+...+símbolo+símbolo.
+  const raw = pick(letters, 4) + pick(digits, 4) + pick(symbols, 2);
+  return raw
+    .split('')
+    .map((c) => ({ c, k: Math.random() }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.c)
+    .join('');
 }

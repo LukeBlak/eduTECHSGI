@@ -69,7 +69,26 @@ function isSameDay(a: Date, b: Date) {
 }
 function parseDateSafe(s?: string): Date | null {
   if (!s) return null;
-  const d = new Date(s);
+  // QA-D-01: Timezone bug. Cuando el backend guarda una fecha como
+  // "2025-08-15" (date-only ISO string), `new Date("2025-08-15")` la
+  // interpreta como UTC midnight. En zonas horarias detrás de UTC (como
+  // El Salvador, UTC-6), los métodos `getMonth()`/`getDate()` regresan
+  // el día anterior. Esto hacía que los eventos aparecieran en el día
+  // equivocado del calendario.
+  //
+  // Fix: si el string es date-only (YYYY-MM-DD), construir el Date usando
+  // el constructor local (year, month-1, day) para que los métodos local
+  // funcionen consistentemente. Si viene con hora (ISO completo con T),
+  // usar el parser nativo.
+  const trimmed = s.trim();
+  const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (dateOnlyMatch) {
+    const [, y, m, d] = dateOnlyMatch;
+    const dt = new Date(Number(y), Number(m) - 1, Number(d));
+    if (isNaN(dt.getTime())) return null;
+    return dt;
+  }
+  const d = new Date(trimmed);
   if (isNaN(d.getTime())) return null;
   return d;
 }

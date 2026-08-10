@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { inject, Injectable } from '@/server/core/container';
-import { ok, badRequest, notFound, serverError, forbidden } from '@/server/core/http';
-import { requirePrivileged } from '@/server/core/auth.guard';
+import { ok, badRequest, notFound, serverError, unauthorized, forbidden } from '@/server/core/http';
+import { requireAuth, requirePrivileged } from '@/server/core/auth.guard';
 import { ClassesService } from './classes.service';
 import { CreateClassDto, UpdateClassDto } from './dto/classes.dto';
 
@@ -9,16 +9,20 @@ import { CreateClassDto, UpdateClassDto } from './dto/classes.dto';
 export class ClassesController {
   private readonly service = inject(ClassesService);
 
-  async list() {
+  async list(req: NextRequest) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       return ok(await this.service.list());
     } catch (e) {
       return serverError('Error al listar clases', e);
     }
   }
 
-  async getById(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  async getById(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const { id } = await ctx.params;
       const c = await this.service.getById(id);
       if (!c) return notFound('Clase no encontrada');

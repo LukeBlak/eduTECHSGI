@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -209,6 +210,7 @@ export function ActividadesSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Activity | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Activity | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [deleteImpact, setDeleteImpact] = useState<{
     socialHoursCount: number;
     totalHours: number;
@@ -287,10 +289,14 @@ export function ActividadesSection() {
     return tab === "mine" ? mineActivities : activities;
   }, [tab, activities, mineActivities]);
 
+  // QA-D-13: debounce del input de búsqueda para evitar recalcular el
+  // filter en cada keystroke (lag visible en listas grandes).
+  const debouncedSearch = useDebouncedValue(search, 200);
+
   const filtered = useMemo(() => {
     const norm = (s: string) =>
       s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    const q = norm(search.trim());
+    const q = norm(debouncedSearch.trim());
     if (!q) return activeList;
     return activeList.filter(
       (a) =>
@@ -298,7 +304,7 @@ export function ActividadesSection() {
         norm(a.description || "").includes(q) ||
         norm(a.location || "").includes(q),
     );
-  }, [activeList, search]);
+  }, [activeList, debouncedSearch]);
 
   // --- Subscribe / Unsubscribe ---
   async function handleSubscribe(activity: Activity) {
@@ -422,6 +428,7 @@ export function ActividadesSection() {
   }
 
   async function handleDelete(a: Activity) {
+    setDeleting(true);
     try {
       await activitiesApi.remove(a.id);
       const count = deleteImpact?.socialHoursCount ?? 0;
@@ -433,8 +440,10 @@ export function ActividadesSection() {
       setDeleteTarget(null);
       setDeleteImpact(null);
       load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -722,11 +731,13 @@ export function ActividadesSection() {
           ) : null}
 
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Sí, eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1133,6 +1144,8 @@ function ActivityFormDialog({
   const [committeeId, setCommitteeId] = useState("none");
   const [volunteerIds, setVolunteerIds] = useState<string[]>([]);
   const [volSearch, setVolSearch] = useState("");
+  // QA-D-13: debounce del search de voluntarios dentro del form.
+  const debouncedVolSearch = useDebouncedValue(volSearch, 200);
 
   useEffect(() => {
     if (open) {
@@ -1171,13 +1184,13 @@ function ActivityFormDialog({
   }
 
   const filteredVols = useMemo(() => {
-    const q = volSearch.trim().toLowerCase();
+    const q = debouncedVolSearch.trim().toLowerCase();
     if (!q) return volunteers;
     return volunteers.filter(
       (v) =>
         v.name.toLowerCase().includes(q) || v.studentId.includes(q),
     );
-  }, [volunteers, volSearch]);
+  }, [volunteers, debouncedVolSearch]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();

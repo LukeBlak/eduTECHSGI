@@ -663,10 +663,23 @@ export class ActivitiesService {
    * `status=registered`, asignándole las horas definidas en la actividad.
    * Las horas ya existentes para ese voluntario+actividad no se duplican.
    * Solo puede ejecutarlo un rol privilegiado (presidente/vice/líder/admin).
+   *
+   * Race-condition-safe (QA-B-04): usa una transacción de Firestore para
+   * reclamar atómicamente el status 'active' → 'completed'. Si dos calls
+   * concurrentes llegan, solo una pasa el claim; la otra retorna
+   * alreadyCompleted=true sin asignar horas dobles.
    */
   async complete(activityId: string, reviewerId: string): Promise<CompleteResult> {
-    const activityDoc = await this.fs.findById<ActivityDoc>('activities', activityId);
-    if (!activityDoc) {
+    // QA-B-04: Atomic claim — si la actividad ya fue completada por otra
+    // llamada concurrente, abortamos sin asignar horas dobles.
+    const { claimed, doc: claimedDoc } = await this.fs.atomicClaim<ActivityDoc>(
+      'activities',
+      activityId,
+      (d) => !!d && d.status === 'active',
+      { status: 'completed', completedAt: new Date().toISOString() },
+    );
+
+    if (!claimedDoc) {
       return {
         success: false,
         message: 'Actividad no encontrada',
@@ -680,19 +693,22 @@ export class ActivitiesService {
       };
     }
 
-    if (activityDoc.status === 'completed') {
+    if (!claimed) {
+      // Otra llamada concurrente ganó la carrera → ya está completada.
       return {
         success: false,
         message: 'La actividad ya fue finalizada anteriormente',
         activityId,
-        title: activityDoc.title,
-        hoursPerVolunteer: activityDoc.hours,
-        hourType: activityDoc.hourType,
+        title: claimedDoc.title,
+        hoursPerVolunteer: claimedDoc.hours,
+        hourType: claimedDoc.hourType,
         assignedCount: 0,
         skipped: [],
         alreadyCompleted: true,
       };
     }
+
+    const activityDoc = claimedDoc;
 
     const activityVolunteers = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
       where: { activityId },
@@ -754,11 +770,9 @@ export class ActivitiesService {
       });
     }
 
-    // Marcar la actividad como completada
-    await this.fs.update<ActivityDoc>('activities', activityId, {
-      status: 'completed',
-      completedAt: new Date().toISOString(),
-    });
+    // La actividad ya fue marcada como 'completed' atómicamente en el
+    // atomicClaim al inicio de complete() — no es necesario un segundo
+    // update aquí (QA-B-04).
 
     // Notificar a cada voluntario con horas asignadas
     void this.notifications.createMany(

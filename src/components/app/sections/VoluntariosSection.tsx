@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -139,6 +140,7 @@ export function VoluntariosSection() {
   const [detailHours, setDetailHours] = useState<VolunteerHours | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Volunteer | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function load() {
@@ -180,8 +182,12 @@ export function VoluntariosSection() {
     return counts;
   }, [volunteers]);
 
+  // QA-D-13: debounce del input de búsqueda para evitar recalcular el
+  // filter en cada keystroke (lag visible con >200 voluntarios).
+  const debouncedSearch = useDebouncedValue(search, 200);
+
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     // Normalize: strip diacritics so "maria" matches "María", "jose" matches "José"
     const norm = (s: string) =>
       s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
@@ -199,7 +205,7 @@ export function VoluntariosSection() {
         v.committeeId === committeeFilter;
       return matchesSearch && matchesCommittee;
     });
-  }, [volunteers, search, committeeFilter]);
+  }, [volunteers, debouncedSearch, committeeFilter]);
 
   const activeFilterCount =
     (search.trim() ? 1 : 0) + (committeeFilter !== "all" ? 1 : 0);
@@ -225,6 +231,7 @@ export function VoluntariosSection() {
   }
 
   async function handleDelete(v: Volunteer) {
+    setDeleting(true);
     try {
       await volunteersApi.remove(v.id);
       toast.success("Voluntario eliminado");
@@ -232,6 +239,8 @@ export function VoluntariosSection() {
       load();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -649,11 +658,13 @@ export function VoluntariosSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -850,7 +861,9 @@ function VolunteerFormDialog({
             <Label htmlFor="v-password">
               Contraseña{" "}
               <span className="text-xs text-muted-foreground font-normal">
-                ({editing ? "dejar vacío para no cambiar" : "vacío = 'voluntario123'"})
+                ({editing
+                  ? "dejar vacío para no cambiar"
+                  : "vacío = se genera una contraseña temporal aleatoria"})
               </span>
             </Label>
             <Input

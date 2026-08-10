@@ -85,6 +85,7 @@ export function ComitesSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Committee | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Committee | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [detailTarget, setDetailTarget] = useState<Committee | null>(null);
 
@@ -121,13 +122,16 @@ export function ComitesSection() {
   }
 
   async function handleDelete(c: Committee) {
+    setDeleting(true);
     try {
       await committeesApi.remove(c.id);
       toast.success("Comité eliminado");
       setDeleteTarget(null);
       load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -376,11 +380,13 @@ export function ComitesSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>

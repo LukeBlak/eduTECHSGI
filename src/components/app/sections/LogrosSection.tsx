@@ -172,6 +172,7 @@ function CatalogTab() {
   const [editing, setEditing] = useState<Achievement | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [toDelete, setToDelete] = useState<Achievement | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -218,6 +219,7 @@ function CatalogTab() {
 
   async function handleDelete() {
     if (!toDelete) return;
+    setDeleting(true);
     try {
       await achievementsApi.remove(toDelete.id);
       toast.success(`Logro "${toDelete.name}" eliminado`);
@@ -225,6 +227,8 @@ function CatalogTab() {
       void load();
     } catch (err: any) {
       toast.error(err.message || "Error al eliminar logro");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -344,11 +348,13 @@ function CatalogTab() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
+              disabled={deleting}
               className="bg-rose-600 hover:bg-rose-700 text-white"
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Sí, eliminar
             </AlertDialogAction>
           </AlertDialogFooter>

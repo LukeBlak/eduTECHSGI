@@ -5,18 +5,25 @@
  * Soporta filtros de rango de meses vía query params:
  *   ?startMonth=YYYY-MM&endMonth=YYYY-MM
  * para memoriaLabores, horasSociales y balanceFinanciero.
+ *
+ * Auth: todos los reportes requieren sesión (requireAuth). El balance
+ * financiero y la memoria de labores además requieren rol privilegiado
+ * (presidente/vice/líder/admin) porque incluyen datos de toda la ONG.
  */
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { inject, Injectable } from '@/server/core/container';
-import { serverError } from '@/server/core/http';
+import { serverError, unauthorized, forbidden } from '@/server/core/http';
+import { requireAuth, requirePrivileged } from '@/server/core/auth.guard';
 import { ReportsService, type PeriodFilter } from './reports.service';
 
 @Injectable()
 export class ReportsController {
   private readonly service = inject(ReportsService);
 
-  async memoriaLabores(req: Request) {
+  async memoriaLabores(req: NextRequest) {
     try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
       const period = parsePeriod(req);
       const buffer = await this.service.memoriaLabores(period);
       const periodLabel = formatPeriodLabel(period);
@@ -33,8 +40,10 @@ export class ReportsController {
     }
   }
 
-  async horasSociales(req: Request) {
+  async horasSociales(req: NextRequest) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const period = parsePeriod(req);
       const buffer = await this.service.horasSociales(period);
       const periodLabel = formatPeriodLabel(period);
@@ -52,8 +61,10 @@ export class ReportsController {
   }
 
   /** ODS Project — siempre requiere un projectId (la ruta es /api/reports/ods-project/[id]). */
-  async odsProject(_req: Request, projectId: string) {
+  async odsProject(req: NextRequest, projectId: string) {
     try {
+      const auth = requireAuth(req);
+      if (!auth.ok) return unauthorized(auth.body.message as string);
       const { buffer, filename } = await this.service.odsProject(projectId);
       return new NextResponse(new Uint8Array(buffer), {
         status: 200,
@@ -69,8 +80,10 @@ export class ReportsController {
     }
   }
 
-  async balanceFinanciero(req: Request) {
+  async balanceFinanciero(req: NextRequest) {
     try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
       const period = parsePeriod(req);
       const buffer = await this.service.balanceFinanciero(period);
       const periodLabel = formatPeriodLabel(period);

@@ -114,6 +114,7 @@ export function EgresosSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function load() {
@@ -139,13 +140,16 @@ export function EgresosSection() {
   }, []);
 
   async function handleDelete(e: Expense) {
+    setDeleting(true);
     try {
       await expenseApi.remove(e.id);
       toast.success("Egreso eliminado");
       setDeleteTarget(null);
       load();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Error al eliminar");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -525,11 +529,13 @@ export function EgresosSection() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
               onClick={() => deleteTarget && handleDelete(deleteTarget)}
             >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
