@@ -1,3 +1,6 @@
+// Force dynamic — evita que Next.js cachee esta ruta en build-time.
+export const dynamic = "force-dynamic";
+
 import '@/server/app.module';
 
 /**

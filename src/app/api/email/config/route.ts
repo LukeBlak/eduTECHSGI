@@ -1,3 +1,6 @@
+// Force dynamic — evita que Next.js cachee esta ruta en build-time.
+export const dynamic = "force-dynamic";
+
 import { NextRequest, NextResponse } from 'next/server';
 import { inject } from '@/server/core/container';
 import { EmailController } from '@/server/modules/email/email.controller';
