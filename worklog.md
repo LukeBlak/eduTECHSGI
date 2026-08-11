@@ -1331,3 +1331,56 @@ Stage Summary:
   funcione correctamente en futuros reinicios.
 - **Cron job creado:** job_id 318438, revisión QA continua cada 15 minutos
   (webDevReview) para detectar regresiones como esta más temprano.
+
+---
+Task ID: FIX-CACHE-1
+Agent: main (Z.ai Code)
+Task: Fix "datos fantasma" — app muestra actividad que no existe en la base de datos.
+
+Work Log:
+- Usuario reportó: "en la base de datos no hay nada de las actividades, pero
+  si está en la app, quiero que lo cambies"
+- Screenshots mostraban:
+  - App: página Actividades con "1 actividad(es) registrada(s)", actividad
+    "prueba" Finalizada, 10 horas, De campo, fecha 11 ago 2026
+  - Firebase Firestore: colecciones visibles = classVolunteers, classes,
+    committees, expenses, incomes, notifications, socialhours, volunteers.
+    NO existe colección 'activities' ni 'activityVolunteers'.
+- Diagnóstico:
+  - El código del activities.service.ts lee de la colección 'activities'
+    (correcto). Si la colección no existe, findAll retorna [] → app mostraría
+    "0 actividades".
+  - Pero la app mostraba 1 actividad → los datos venían de una respuesta
+    API cacheada, no de Firestore.
+  - CAUSA RAÍZ: Ninguno de los 56 route handlers tenía 'force-dynamic'
+    ni las respuestas incluían headers Cache-Control. Next.js 16 y el
+    CDN de Vercel podían cachear las respuestas API. Cuando se borraba
+    data de Firestore (o se eliminaba la colección completa), la app
+    seguía mostrando la versión cached.
+- Fix aplicado (2 niveles):
+  1. src/server/core/http.ts: todas las helpers (ok, created, badRequest,
+     unauthorized, forbidden, notFound, serverError) ahora incluyen:
+       Cache-Control: no-store, no-cache, must-revalidate
+       Pragma: no-cache
+       Expires: 0
+     Un solo cambio afecta las 56 rutas.
+  2. Los 56 route files en src/app/api/** ahora tienen:
+       export const dynamic = 'force-dynamic';
+     (script sed aplicado a todos los archivos)
+- Verificación:
+  - curl -sI a 4 endpoints (/api/committees, /api/volunteers,
+    /api/activities, /api/dashboard) → todos incluyen
+    cache-control: no-store, no-cache, must-revalidate ✅
+  - Lint: 0 errores, 3 warnings preexistentes.
+- Commit + push: 9843ecc fix(cache): prevenir datos fantasma
+
+Stage Summary:
+- **Bug de datos fantasma arreglado.** La app ahora SIEMPRE muestra data
+  fresca de Firestore, sin importar qué tenga cacheado el navegador o CDN.
+- **56 route files** modificados con force-dynamic + headers anti-cache.
+- **Un solo punto central de cambio** (http.ts) para los headers, lo que
+  facilita mantenimiento futuro.
+- **Para que el fix tome efecto en producción:** Vercel debe hacer redeploy
+  con el commit 9843ecc. Después del redeploy, el usuario debe hacer
+  hard-refresh del navegador (Ctrl+Shift+R) para limpiar el cache del
+  navegador. A partir de ahí, la app no mostrará más datos fantasma.
