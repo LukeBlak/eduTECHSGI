@@ -1444,3 +1444,28 @@ Stage Summary:
 - Feature "Evento Rápido" (plantilla simplificada de asignación) YA está completa en producción — cumple todos los campos pedidos por el usuario: Actividad, horas, campo/administrativa, ubicación, comité, cupo máximo, selección de voluntarios.
 - Token GitHub PAT del usuario configurado localmente en `~/.git-credentials` para futuras operaciones.
 - Próximas operaciones git solo necesitarán `git pull`/`git push` directos.
+
+---
+Task ID: FIX-PERFIL-404-1
+Agent: main (Z.ai Code)
+Task: Fix crash del botón "Mi Perfil" (TypeError: Cannot read properties of null reading 'id' en .reduce() + 500 en /api/activities/mine) y crear página 404 personalizada + error boundary.
+
+Work Log:
+- Diagnosticado el crash: en PerfilSection.tsx línea 215, `(volunteer.activityLinks || []).reduce()` accedía a `link.activity.id` sin verificar null. Cuando un voluntario tenía una inscripción (`activityVolunteers`) pero la actividad fue borrada, `link.activity` llegaba null y el reduce crasheaba.
+- El 500 en `/api/activities/mine` venía del mismo problema: `activities.service.listForVolunteer` hacía `{...null}` (spread de null) lo cual produce objetos sin `id`, y combinado con el orderBy/in operator podía generar respuestas malformadas en prod.
+- Fix backend `activities.service.listForVolunteer` (línea 640-674): ahora retorna `null` explícito para links huérfanos y los filtra con `.filter((r): r is NonNullable<typeof r> => r !== null)`. Garantiza que cada item retornado tenga `id`.
+- Fix backend `volunteers.service.get` (línea 169-173): mismo patrón defensivo para `activityLinks` — filtra los que tienen `activity === null` con `.then((items) => items.filter((l) => l.activity !== null))`.
+- Fix frontend `PerfilSection.tsx` (línea 213-227): `.reduce()` defensivo con `if (!link?.activity) return sum;` antes de acceder a `link.activity.id`. Defense-in-depth: aunque el backend ya no envíe nulls, el cliente no vuelve a crashear si llega data inconsistente.
+- Creado `src/app/not-found.tsx`: página 404 con estética de marca (logo EduTech, "404" gigante en color `text-brand-primary`, icono Compass, heading "Página no encontrada", botones "Ir al inicio" / "Volver atrás", footer). Server Component, responsive, con círculos blur decorativos.
+- Creado `src/app/error.tsx`: error boundary global (Client Component obligatorio). Captura runtime crashes y muestra UI amigable en vez del feo "Application error: a client-side exception has occurred" de Next.js. Tiene botón "Intentar de nuevo" (llama `reset()`), "Ir al inicio", y detalles técnicos colapsables con stack/digest/message para debugging.
+- Verificación con agent-browser: cargué `/pagina-que-no-existe` y confirmé que la 404 renderiza con logo, heading, ambos botones. Primera captura mostraba el "404" como bloque sólido (bg-clip-text con gradiente custom no funcionaba). Cambié a `text-brand-primary` (color sólido) y verificación con VLM confirmó: dígitos visibles, logo presente, compass presente, botones side-by-side, diseño limpio y profesional.
+- Lint: 0 errores, solo warnings menores (ya limpios).
+- Dev server recompiló OK después de los cambios, sin errores.
+- Commit `7415bba` + push a origin/main exitoso (`10aee22..7415bba`).
+
+Stage Summary:
+- Crash del botón "Mi Perfil" resuelto en 2 capas (backend filtra + cliente defensive-check). Ya no se reproduce el "Cannot read properties of null (reading 'id')".
+- Endpoint `/api/activities/mine` ya no devuelve 500 por inscripciones huérfanas — ahora filtra las que no tienen actividad válida.
+- Página 404 creada y verificada visualmente con VLM (todos los elementos renderizan correctamente).
+- Error boundary global creado — cualquier runtime crash futuro ahora muestra UI amigable con detalles técnicos opcionales en vez del error feo por defecto.
+- Repositorio en GitHub actualizado: `origin/main` == `main` local (commit `7415bba`).
