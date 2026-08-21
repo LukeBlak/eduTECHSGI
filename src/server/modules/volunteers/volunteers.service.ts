@@ -166,6 +166,10 @@ export class VolunteersService {
               : null;
             return { ...av, activity };
           }),
+        ).then((items) =>
+          // QA-FIX-MINE-1: filtrar links huérfanos (actividad borrada) para
+          // evitar crashes client-side al acceder a `link.activity.id`.
+          items.filter((l) => l.activity !== null),
         ),
         Promise.all(
           classLinks.map(async (cl) => {

@@ -212,6 +212,10 @@ export function PerfilSection() {
     );
     const totalBeneficiaries = (volunteer.activityLinks || []).reduce(
       (sum, link) => {
+        // QA-FIX-MINE-1: defensa contra links huérfanos (actividad borrada).
+        // El backend ya filtra estos casos, pero mantenemos la validación
+        // client-side para no volver a crashear si llega data inconsistente.
+        if (!link?.activity) return sum;
         if (!linkedActivityIds.has(link.activity.id)) return sum;
         return (
           sum +

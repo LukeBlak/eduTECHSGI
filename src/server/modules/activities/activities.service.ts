@@ -626,25 +626,38 @@ export class ActivitiesService {
     };
   }
 
-  /** Devuelve las actividades en las que un voluntario está inscrito. */
+  /**
+   * Devuelve las actividades en las que un voluntario está inscrito.
+   *
+   * QA-FIX-MINE-1: Filtra inscripciones huérfanas (cuando la actividad
+   * fue borrada pero el documento en `activityVolunteers` sigue).
+   * Antes, al esparcir `...null` se devolvía un objeto sin `id`, lo que
+   * hacía que el `.reduce()` del cliente crasheara con
+   * "Cannot read properties of null (reading 'id')" y el endpoint
+   * reportara 500 en producción. Ahora se omite cualquier link cuya
+   * actividad ya no exista, garantizando que cada item retornado tenga `id`.
+   */
   async listForVolunteer(volunteerId: string) {
     const links = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
       where: { volunteerId, status: { op: 'in', value: ['registered', 'waitlist'] } },
       orderBy: { field: 'createdAt', direction: 'desc' },
     });
-    return Promise.all(
+    const results = await Promise.all(
       links.map(async (l) => {
-        const activity = l.activityId
-          ? await this.fs.findById<ActivityDoc>('activities', l.activityId)
-          : null;
+        // Sin activityId o con actividad borrada → link huérfano, lo omitimos.
+        if (!l.activityId) return null;
+        const activity = await this.fs.findById<ActivityDoc>('activities', l.activityId);
+        if (!activity) return null;
+
         let committee: CommitteeDoc | null = null;
-        if (activity?.committeeId) {
+        if (activity.committeeId) {
           committee = await this.fs.findById<CommitteeDoc>('committees', activity.committeeId);
         }
-        const activityWithCommittee = activity ? { ...activity, committee } : null;
+
         return {
-          ...activityWithCommittee,
-          ods: activity?.ods
+          ...activity,
+          committee,
+          ods: activity.ods
             ? activity.ods
                 .split(',')
                 .map((s) => s.trim())
@@ -655,6 +668,9 @@ export class ActivitiesService {
         };
       }),
     );
+    // Descarta links huérfanos (actividad borrada) — garantiza que cada
+    // item retornado tenga `id`, evitando crashes en el cliente.
+    return results.filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   /**
