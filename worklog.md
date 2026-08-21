@@ -1384,3 +1384,42 @@ Stage Summary:
   con el commit 9843ecc. Después del redeploy, el usuario debe hacer
   hard-refresh del navegador (Ctrl+Shift+R) para limpiar el cache del
   navegador. A partir de ahí, la app no mostrará más datos fantasma.
+
+---
+Task ID: FEAT-QUICK-EVENT
+Agent: main (Z.ai Code) + full-stack-developer subagent
+Task: Crear flujo 'Evento Rápido' para asignar horas sin formulario completo.
+
+Work Log:
+- Usuario reportó: para eventos simples (ferias de San Valentín, etc.)
+  tenía que usar el formulario completo de actividad (ODS, objetivos,
+  impacto, beneficiarios, ~20 campos) que no tiene sentido para eventos
+  internos.
+- Implementé el feature completo (backend + frontend):
+  - DTO: QuickEventDto en activities.dto.ts
+  - Service: quickEvent() en activities.service.ts (~140 LOC)
+    → crea actividad (status: 'completed'), activityVolunteers,
+    socialHours aprobadas, notificaciones, logros, realtime events
+  - Controller: quickEvent() handler con requirePrivileged guard
+  - Route: POST /api/activities/quick-event/route.ts (force-dynamic)
+  - API client: activitiesApi.quickEvent() en api.ts
+  - UI: QuickEventDialog compacto en ActividadesSection.tsx
+    → solo 7 campos: título, horas, tipo, ubicación, comité, cupo,
+    voluntarios (multi-select con búsqueda)
+  - Botón 'Evento rápido' (icono Zap) junto a 'Nueva actividad'
+- Verificación:
+  - Lint: 0 errores (3 warnings preexistentes no relacionados)
+  - Dev server: compila sin errores
+  - POST /api/activities/quick-event sin auth → 403 ✅
+  - GET /api/activities sin auth → 401 ✅
+  - Cero errores 500
+- Commit local: 68fad05 feat(activities): Evento Rápido
+- PUSH FALLÓ: token de GitHub parece revocado/expirado.
+  El commit está listo localmente (ahead 1 de origin/main).
+
+Stage Summary:
+- **Feature completo.** El usuario ahora puede crear un evento rápido
+  con solo título, horas, tipo, ubicación, comité, cupo y voluntarios.
+  Todo en un solo paso — la actividad se crea YA completada y las horas
+  se asignan automáticamente como aprobadas.
+- **Pendiente:** push a origin/main (necesita token nuevo de GitHub).
