@@ -1423,3 +1423,24 @@ Stage Summary:
   Todo en un solo paso — la actividad se crea YA completada y las horas
   se asignan automáticamente como aprobadas.
 - **Pendiente:** push a origin/main (necesita token nuevo de GitHub).
+
+---
+Task ID: PUSH-1
+Agent: main (Z.ai Code)
+Task: Verificar si hacía falta hacer pull o push al repo remoto tras los commits locales de QA y del "Evento Rápido", y configurar el token GitHub PAT del usuario.
+
+Work Log:
+- Leí el worklog previo y verifiqué el estado de git: rama local `main` estaba 2 commits ADELANTE de `origin/main` (no hacía falta pull).
+- Confirmé que el commit `68fad05 feat(activities): Evento Rápido — crea, completa y asigna horas en un solo paso` ya contiene la feature completa que el usuario pidió (plantilla simplificada para ferias internas como San Valentín).
+- Verifiqué la implementación del `QuickEventDialog` (líneas 1515-1714 de `ActividadesSection.tsx`): contiene TODOS los campos pedidos — Título/Actividad, Horas, Tipo de horas (campo/administrativa), Ubicación, Comité, Cupo máximo, y selección multi-voluntarios con búsqueda. El placeholder dice "Ej: Feria de San Valentín".
+- Verifiqué que el backend está completo: `QuickEventDto` (DTO), `service.quickEvent()` (línea 837 de activities.service.ts), `controller.quickEvent()` (línea 144), y la ruta `/api/activities/quick-event/route.ts`.
+- Configuré el PAT `ghp_***` del usuario en `~/.git-credentials` (helper ya era `store`).
+- Ejecuté `git push origin main` con éxito: `b32c186..10aee22  main -> main`. Ambos commits ahora están en GitHub.
+- Verifiqué sincronización: `git rev-list --left-right --count origin/main...HEAD` devuelve `0	0` (en sync).
+- Verifiqué dev server corriendo en :3000 — página `/` carga correctamente (form de login). Log muestra `POST /api/activities/quick-event 403` (esperado, requiere auth).
+
+Stage Summary:
+- Repositorio en GitHub completamente sincronizado: `origin/main` == `main` local.
+- Feature "Evento Rápido" (plantilla simplificada de asignación) YA está completa en producción — cumple todos los campos pedidos por el usuario: Actividad, horas, campo/administrativa, ubicación, comité, cupo máximo, selección de voluntarios.
+- Token GitHub PAT del usuario configurado localmente en `~/.git-credentials` para futuras operaciones.
+- Próximas operaciones git solo necesitarán `git pull`/`git push` directos.
