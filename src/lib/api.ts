@@ -662,6 +662,19 @@ export const activitiesApi = {
       skipped: { volunteerId: string; reason: string }[];
       alreadyCompleted: boolean;
     }>(`/activities/${id}/complete`, { method: "POST" }),
+  /**
+   * Evento rápido: crea, completa y asigna horas aprobadas en un solo paso.
+   * Diseñado para eventos internos simples.
+   */
+  quickEvent: (body: {
+    title: string;
+    hours: number;
+    hourType: 'admin' | 'field';
+    location?: string;
+    committeeId?: string | null;
+    capacity?: number | null;
+    volunteerIds: string[];
+  }) => fetchApi<{ success: boolean; message: string; assignedCount: number; hoursPerVolunteer: number; hourType: string }>('/activities/quick-event', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 /* ============ Social Hours ============ */

@@ -3,7 +3,7 @@ import { inject, Injectable } from '@/server/core/container';
 import { ok, badRequest, notFound, serverError, unauthorized, forbidden } from '@/server/core/http';
 import { requireAuth, requirePrivileged } from '@/server/core/auth.guard';
 import { ActivitiesService } from './activities.service';
-import { CreateActivityDto, UpdateActivityDto } from './dto/activities.dto';
+import { CreateActivityDto, UpdateActivityDto, QuickEventDto } from './dto/activities.dto';
 
 @Injectable()
 export class ActivitiesController {
@@ -134,6 +134,24 @@ export class ActivitiesController {
       return ok(result);
     } catch (e) {
       return serverError('Error al finalizar actividad', e);
+    }
+  }
+
+  /**
+   * POST /api/activities/quick-event — evento rápido.
+   * Crea, completa y asigna horas aprobadas en un solo paso.
+   */
+  async quickEvent(req: NextRequest) {
+    try {
+      const auth = requirePrivileged(req);
+      if (!auth.ok) return forbidden(auth.body.message as string);
+      const body = await req.json();
+      const parsed = QuickEventDto.safeParse(body);
+      if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? 'Datos inválidos');
+      const result = await this.service.quickEvent(parsed.data, auth.user!.userId);
+      return ok(result, 201);
+    } catch (e) {
+      return serverError('Error al crear evento rápido', e);
     }
   }
 

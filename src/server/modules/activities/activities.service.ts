@@ -10,7 +10,7 @@ import { NotificationsService } from '@/server/modules/notifications/notificatio
 import { AchievementsService } from '@/server/modules/achievements/achievements.service';
 import { realtime, REALTIME_EVENTS } from '@/lib/realtime-publisher';
 import { sanitizeVolunteer } from '@/server/core/sanitize';
-import type { CreateActivityInput, UpdateActivityInput } from './dto/activities.dto';
+import type { CreateActivityInput, UpdateActivityInput, QuickEventInput } from './dto/activities.dto';
 
 interface VolunteerDoc {
   id: string;
@@ -826,6 +826,150 @@ export class ActivitiesService {
       assignedCount: assigned.length,
       skipped,
       alreadyCompleted: false,
+    };
+  }
+
+  /**
+   * Evento rápido: crea, completa y asigna horas aprobadas en un solo paso.
+   * Diseñado para eventos internos simples (ferias, celebraciones, etc.)
+   * donde no se necesita el formulario completo de actividad.
+   */
+  async quickEvent(
+    input: QuickEventInput,
+    reviewerId: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    activity: ReturnType<ActivitiesService['serialize']>;
+    assignedCount: number;
+    hoursPerVolunteer: number;
+    hourType: 'admin' | 'field';
+  }> {
+    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
+
+    // 1. Crear la actividad directamente como completada
+    const created = await this.fs.create<ActivityDoc>('activities', {
+      title: input.title,
+      description: '',
+      objectives: '',
+      impact: '',
+      type: 'Evento rápido',
+      startDate: today,
+      endDate: today,
+      location: input.location ?? '',
+      hours: input.hours,
+      hourType: input.hourType,
+      capacity: input.capacity ?? null,
+      status: 'completed',
+      completedAt: now,
+      beneficiariesMen: 0,
+      beneficiariesWomen: 0,
+      ods: '',
+      committeeId: input.committeeId || null,
+    });
+
+    // 2. Para cada voluntario: crear ActivityVolunteer + SocialHour aprobada
+    const assigned: { volunteerId: string; volunteerName: string }[] = [];
+
+    for (const vid of input.volunteerIds) {
+      await this.fs.create<ActivityVolunteerDoc>('activityVolunteers', {
+        activityId: created.id,
+        volunteerId: vid,
+        status: 'registered',
+      });
+
+      await this.fs.create<SocialHourDoc>('socialHours', {
+        volunteerId: vid,
+        activityId: created.id,
+        hours: input.hours,
+        type: input.hourType,
+        date: today,
+        notes: `Evento rápido: ${input.title}`,
+        approvalStatus: 'approved',
+        reviewerId,
+        reviewedAt: now,
+      });
+
+      const vol = await this.fs.findById<VolunteerDoc>('volunteers', vid);
+      assigned.push({ volunteerId: vid, volunteerName: vol?.name ?? 'Voluntario' });
+    }
+
+    // 3. Notificar a cada voluntario
+    void this.notifications.createMany(
+      assigned.map((a) => ({
+        userId: a.volunteerId,
+        type: 'social_hour' as const,
+        title: `+${input.hours}h aprobadas · ${input.title}`,
+        message: `Se te asignaron ${input.hours} hora(s) social(es) de tipo ${
+          input.hourType === 'admin' ? 'administrativa' : 'de campo'
+        } por el evento rápido "${input.title}". Revisa tu perfil para ver tu total acumulado.`,
+        link: '/perfil',
+        metadata: {
+          activityId: created.id,
+          hours: input.hours,
+          hourType: input.hourType,
+          approved: true,
+          autoAssigned: true,
+          quickEvent: true,
+        },
+      })),
+    );
+
+    // 4. Notificar admins
+    void this.notifications.notifyAdmins({
+      type: 'activity',
+      title: `Evento rápido creado: ${input.title}`,
+      message: `Se creó y completó el evento rápido "${input.title}" con ${assigned.length} voluntario(s) y ${input.hours}h de tipo ${
+        input.hourType === 'admin' ? 'administrativa' : 'de campo'
+      } cada uno.`,
+      link: '/actividades',
+      metadata: { activityId: created.id, quickEvent: true, assignedCount: assigned.length },
+    });
+
+    // 5. Evaluar logros automáticos para cada voluntario
+    for (const a of assigned) {
+      void this.achievements
+        .evaluateAutoForVolunteer(a.volunteerId)
+        .catch((err) =>
+          console.warn('[activities] Error al evaluar logros tras evento rápido:', err),
+        );
+    }
+
+    // 6. Emitir eventos realtime
+    void realtime.emit(REALTIME_EVENTS.ACTIVITY_CREATED, {
+      activityId: created.id,
+      title: created.title,
+    });
+    void realtime.emit(REALTIME_EVENTS.ACTIVITY_SUBSCRIBED, {
+      activityId: created.id,
+    });
+    void realtime.refreshDashboard({ reason: 'activity:created' });
+
+    // 7. Serializar actividad con include para retornar
+    const committee = created.committeeId
+      ? await this.fs.findById<CommitteeDoc>('committees', created.committeeId)
+      : null;
+    const activityVolunteers = await this.fs.findAll<ActivityVolunteerDoc>('activityVolunteers', {
+      where: { activityId: created.id },
+    });
+    const volunteers = await Promise.all(
+      activityVolunteers.map(async (av) => {
+        const volunteer = av.volunteerId
+          ? await this.fs.findById<VolunteerDoc>('volunteers', av.volunteerId)
+          : null;
+        return { ...av, volunteer };
+      }),
+    );
+    const serialized = this.serialize({ ...created, committee, volunteers });
+
+    return {
+      success: true,
+      message: `Evento rápido creado. Se asignaron ${input.hours}h a ${assigned.length} voluntario(s).`,
+      activity: serialized,
+      assignedCount: assigned.length,
+      hoursPerVolunteer: input.hours,
+      hourType: input.hourType,
     };
   }
 

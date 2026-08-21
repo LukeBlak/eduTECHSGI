@@ -22,6 +22,7 @@ import {
   Bookmark,
   AlertTriangle,
   Hourglass,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +72,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { ActivityDetailDialog } from "./ActivityDetailDialog";
 import {
   activitiesApi,
@@ -227,6 +229,8 @@ export function ActividadesSection() {
   const [completeTarget, setCompleteTarget] = useState<Activity | null>(null);
   const [completing, setCompleting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [quickEventOpen, setQuickEventOpen] = useState(false);
+  const [quickEventSubmitting, setQuickEventSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -483,15 +487,25 @@ export function ActividadesSection() {
         description={`${activeList.length} actividad(es) ${tab === "mine" ? "inscrita(s)" : "registrada(s)"}`}
         action={
           isAdmin ? (
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setFormOpen(true);
-              }}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground h-11"
-            >
-              <Plus className="size-4" /> Nueva actividad
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setQuickEventOpen(true)}
+                className="gap-1.5 h-11"
+              >
+                <Zap className="size-4" />
+                Evento rápido
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground h-11"
+              >
+                <Plus className="size-4" /> Nueva actividad
+              </Button>
+            </div>
           ) : null
         }
       />
@@ -584,6 +598,27 @@ export function ActividadesSection() {
           ))}
         </div>
       )}
+
+      <QuickEventDialog
+        open={quickEventOpen}
+        volunteers={volunteers}
+        committees={committees}
+        onOpenChange={setQuickEventOpen}
+        submitting={quickEventSubmitting}
+        onSubmit={async (data) => {
+          setQuickEventSubmitting(true);
+          try {
+            const res = await activitiesApi.quickEvent(data);
+            toast.success(res.message);
+            setQuickEventOpen(false);
+            load();
+          } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : 'Error al crear evento rápido');
+          } finally {
+            setQuickEventSubmitting(false);
+          }
+        }}
+      />
 
       <ActivityFormDialog
         open={formOpen}
@@ -1468,6 +1503,274 @@ function ActivityFormDialog({
             >
               {submitting && <Loader2 className="size-4 animate-spin" />}
               {editing ? "Guardar cambios" : "Crear actividad"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================================
+// QuickEventDialog — crea, completa y asigna horas en un solo paso
+// ============================================================================
+
+function QuickEventDialog({
+  open,
+  volunteers,
+  committees,
+  onOpenChange,
+  submitting,
+  onSubmit,
+}: {
+  open: boolean;
+  volunteers: Volunteer[];
+  committees: Committee[];
+  onOpenChange: (o: boolean) => void;
+  submitting: boolean;
+  onSubmit: (data: {
+    title: string;
+    hours: number;
+    hourType: "admin" | "field";
+    location?: string;
+    committeeId?: string | null;
+    capacity?: number | null;
+    volunteerIds: string[];
+  }) => void | Promise<void>;
+}) {
+  const [title, setTitle] = useState("");
+  const [hours, setHours] = useState("");
+  const [hourType, setHourType] = useState<HourType>("field");
+  const [location, setLocation] = useState("");
+  const [committeeId, setCommitteeId] = useState("none");
+  const [capacity, setCapacity] = useState("");
+  const [volunteerIds, setVolunteerIds] = useState<string[]>([]);
+  const [volSearch, setVolSearch] = useState("");
+  const debouncedVolSearch = useDebouncedValue(volSearch, 200);
+
+  useEffect(() => {
+    if (open) {
+      setTitle("");
+      setHours("");
+      setHourType("field");
+      setLocation("");
+      setCommitteeId("none");
+      setCapacity("");
+      setVolunteerIds([]);
+      setVolSearch("");
+    }
+  }, [open]);
+
+  function toggleVolunteer(id: string) {
+    setVolunteerIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  const filteredVols = useMemo(() => {
+    const q = debouncedVolSearch.trim().toLowerCase();
+    if (!q) return volunteers;
+    return volunteers.filter(
+      (v) =>
+        v.name.toLowerCase().includes(q) || v.studentId.includes(q),
+    );
+  }, [volunteers, debouncedVolSearch]);
+
+  function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = title.trim();
+    if (trimmed.length < 3) {
+      toast.error("El título debe tener al menos 3 caracteres");
+      return;
+    }
+    const h = parseFloat(hours);
+    if (!h || h < 0.5) {
+      toast.error("Las horas deben ser al menos 0.5");
+      return;
+    }
+    if (volunteerIds.length === 0) {
+      toast.error("Selecciona al menos un voluntario");
+      return;
+    }
+    void onSubmit({
+      title: trimmed,
+      hours: h,
+      hourType,
+      location: location.trim() || undefined,
+      committeeId: committeeId === "none" ? null : committeeId,
+      capacity: capacity ? parseInt(capacity, 10) : null,
+      volunteerIds,
+    });
+  }
+
+  const canSubmit =
+    title.trim().length >= 3 &&
+    parseFloat(hours) >= 0.5 &&
+    volunteerIds.length > 0 &&
+    !submitting;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Zap className="size-5 text-amber-500" />
+            Evento rápido
+          </DialogTitle>
+          <DialogDescription>
+            Crea, completa y asigna horas automáticamente
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={submit} className="space-y-4">
+          {/* Título */}
+          <div className="space-y-1.5">
+            <Label htmlFor="qe-title">Título *</Label>
+            <Input
+              id="qe-title"
+              placeholder="Ej: Feria de San Valentín"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          {/* Horas + Tipo */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="qe-hours">Horas *</Label>
+              <Input
+                id="qe-hours"
+                type="number"
+                min={0.5}
+                step={0.5}
+                placeholder="1.5"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qe-hourtype">Tipo de horas</Label>
+              <Select value={hourType} onValueChange={(v) => setHourType(v as HourType)}>
+                <SelectTrigger id="qe-hourtype">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="field">De campo</SelectItem>
+                  <SelectItem value="admin">Administrativas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Ubicación */}
+          <div className="space-y-1.5">
+            <Label htmlFor="qe-location">Ubicación</Label>
+            <Input
+              id="qe-location"
+              placeholder="Opcional"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            />
+          </div>
+
+          {/* Comité + Cupo */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="qe-committee">Comité</Label>
+              <Select value={committeeId} onValueChange={setCommitteeId}>
+                <SelectTrigger id="qe-committee">
+                  <SelectValue placeholder="Ninguno" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Ninguno</SelectItem>
+                  {committees.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="qe-capacity">Cupo máximo</Label>
+              <Input
+                id="qe-capacity"
+                type="number"
+                min={1}
+                step={1}
+                placeholder="Ilimitado"
+                value={capacity}
+                onChange={(e) => setCapacity(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Voluntarios */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Voluntarios *</Label>
+              {volunteerIds.length > 0 && (
+                <Badge variant="secondary" className="text-xs tabular-nums">
+                  {volunteerIds.length} seleccionado(s)
+                </Badge>
+              )}
+            </div>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre o carné..."
+                value={volSearch}
+                onChange={(e) => setVolSearch(e.target.value)}
+                className="pl-8 h-9"
+              />
+            </div>
+            <ScrollArea className="max-h-56 rounded-md border">
+              <div className="p-1.5 space-y-0.5">
+                {filteredVols.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-3">
+                    Sin coincidencias
+                  </p>
+                ) : (
+                  filteredVols.map((v) => (
+                    <label
+                      key={v.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent rounded px-1.5 py-1.5 min-h-[36px]"
+                    >
+                      <Checkbox
+                        checked={volunteerIds.includes(v.id)}
+                        onCheckedChange={() => toggleVolunteer(v.id)}
+                      />
+                      <span className="size-6 rounded-full bg-primary/15 text-primary flex items-center justify-center text-[10px] font-semibold shrink-0">
+                        {v.name.charAt(0).toUpperCase()}
+                      </span>
+                      <span className="truncate flex-1">{v.name}</span>
+                      <span className="text-xs text-muted-foreground font-mono">
+                        {v.studentId}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              disabled={!canSubmit}
+            >
+              {submitting && <Loader2 className="size-4 animate-spin" />}
+              Crear evento y asignar horas
             </Button>
           </DialogFooter>
         </form>

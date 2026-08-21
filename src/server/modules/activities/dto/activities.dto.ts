@@ -22,6 +22,17 @@ export const CreateActivityDto = z.object({
   volunteerIds: z.array(z.string()).optional().default([]),
 });
 
+export const QuickEventDto = z.object({
+  title: z.string().min(3),
+  hours: z.number().min(0.5).max(100),
+  hourType: z.enum(['admin', 'field']),
+  location: z.string().optional().or(z.literal('')),
+  committeeId: z.string().optional().nullable(),
+  capacity: z.number().int().min(1).optional().nullable(),
+  volunteerIds: z.array(z.string()).min(1),
+});
+export type QuickEventInput = z.infer<typeof QuickEventDto>;
+
 export const UpdateActivityDto = CreateActivityDto.partial();
 
 export type CreateActivityInput = z.infer<typeof CreateActivityDto>;
