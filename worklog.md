@@ -1469,3 +1469,26 @@ Stage Summary:
 - Página 404 creada y verificada visualmente con VLM (todos los elementos renderizan correctamente).
 - Error boundary global creado — cualquier runtime crash futuro ahora muestra UI amigable con detalles técnicos opcionales en vez del error feo por defecto.
 - Repositorio en GitHub actualizado: `origin/main` == `main` local (commit `7415bba`).
+
+---
+Task ID: FIX-PERFIL-TITLE-1
+Agent: main (Z.ai Code)
+Task: Fix nuevo crash del botón "Mi Perfil": TypeError: Cannot read properties of null (reading 'title') en un .map().
+
+Work Log:
+- Diagnóstico: el crash seguía el mismo patrón que QA-FIX-MINE-1 pero ahora con `classLinks` y `volunteerAchievements`. Cuando una clase o logro es borrada pero el documento en `classVolunteers`/`volunteerAchievements` sigue existiendo, el join del backend devolvía `{ class: null }` o `{ achievement: null }`, y el `.map()` del cliente crasheaba al acceder a `c.title` o `g.achievement.tier`.
+- Localizado el crash exacto: `PerfilSection.tsx` línea 883 `{c.title}` dentro de `volunteer.classLinks?.map(({ class: c, role }) => ...)`. Accesos adicionales peligrosos en la misma callback: `c.school`, `c.durationHours`, `c.date` (línea 885-891).
+- Fix backend `volunteers.service.get` (línea 181-186): añadido `.then((items) => items.filter((l) => l.class !== null))` después del Promise.all de classLinks, igual que ya había hecho con activityLinks.
+- Fix backend `achievements.service.listByVolunteer` (línea 385-400): añadido filtro `enriched.filter((g) => g.achievement !== null)` para descartar grants huérfanos (logro borrado). Esto era un LANDMINE que podía crashear después con `Cannot read properties of null (reading 'tier')`.
+- Fix frontend `PerfilSection.tsx`:
+  - Línea 874: `classLinks.map` ahora usa block syntax con guard `if (!c) return null;` antes del JSX. Todos los accesos a `c.title`, `c.school`, `c.durationHours`, `c.date` ahora están protegidos.
+  - Línea 645: `myAchievements.map` ahora usa guard `if (!g?.achievement) return null;` antes de `tierConfig(g.achievement.tier)` y `ach.name`/`ach.points`.
+- Lint: 0 errores, 3 warnings menores preexistentes (no relacionados).
+- Dev server recompiló limpio. Página 404 y home verificadas funcionando.
+- Commit `fce0551` + push exitoso a origin/main (`7415bba..fce0551`).
+
+Stage Summary:
+- Crash 'reading title' en PerfilSection resuelto en 2 capas (backend filtra classLinks/achievements huérfanos + frontend defensive-check en .map).
+- Patrón de bug ORPHAN-LINK auditado y cerrado en 3 relaciones: activityLinks (QA-FIX-MINE-1), classLinks (QA-FIX-MINE-2), volunteerAchievements (QA-FIX-MINE-3).
+- La regla arquitectónica ahora clara: cualquier endpoint que haga join manual en Firestore debe filtrar resultados cuyo joined-entity sea null, porque Firestore no tiene CASCADE ni foreign keys.
+- Repositorio GitHub actualizado: origin/main == main local (commit fce0551).
