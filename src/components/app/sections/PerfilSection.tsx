@@ -643,6 +643,10 @@ export function PerfilSection() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {myAchievements.map((g) => {
+                // QA-FIX-MINE-3: defensa contra grants huérfanos (logro
+                // borrado pero volunteerAchievements sigue). El backend ya
+                // filtra, pero el guard client-side evita regresiones.
+                if (!g?.achievement) return null;
                 const tier = tierConfig(g.achievement.tier);
                 const ach = g.achievement;
                 return (
@@ -871,28 +875,35 @@ export function PerfilSection() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {volunteer.classLinks?.map(({ class: c, role }) => (
-                <div
-                  key={c.id}
-                  className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30"
-                >
-                  <div className={`size-9 rounded-lg flex items-center justify-center shrink-0 ${role === "instructor" ? "bg-primary/15 text-primary" : "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"}`}>
-                    <GraduationCap className="size-4" />
+              {volunteer.classLinks?.map(({ class: c, role }) => {
+                // QA-FIX-MINE-2: defensa contra classLinks huérfanos
+                // (clase borrada pero classVolunteers sigue). El backend ya
+                // filtra estos casos, pero mantenemos el guard client-side
+                // para no volver a crashear si llega data inconsistente.
+                if (!c) return null;
+                return (
+                  <div
+                    key={c.id}
+                    className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30"
+                  >
+                    <div className={`size-9 rounded-lg flex items-center justify-center shrink-0 ${role === "instructor" ? "bg-primary/15 text-primary" : "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300"}`}>
+                      <GraduationCap className="size-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate">{c.title}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {c.school || "—"} · {c.durationHours} h · {formatDate(c.date)}
+                      </p>
+                      <Badge
+                        variant="outline"
+                        className={`mt-1 text-[10px] capitalize ${role === "instructor" ? "border-primary/30 text-primary" : "border-sky-300 text-sky-700 dark:border-sky-800 dark:text-sky-300"}`}
+                      >
+                        {role === "instructor" ? "Instructor" : "Asistente"}
+                      </Badge>
+                    </div>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{c.title}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {c.school || "—"} · {c.durationHours} h · {formatDate(c.date)}
-                    </p>
-                    <Badge
-                      variant="outline"
-                      className={`mt-1 text-[10px] capitalize ${role === "instructor" ? "border-primary/30 text-primary" : "border-sky-300 text-sky-700 dark:border-sky-800 dark:text-sky-300"}`}
-                    >
-                      {role === "instructor" ? "Instructor" : "Asistente"}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>

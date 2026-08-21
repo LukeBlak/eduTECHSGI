@@ -388,11 +388,15 @@ export class AchievementsService {
       orderBy: { field: 'createdAt', direction: 'desc' },
     });
     // include: { achievement: true, grantedBy: true }
-    return Promise.all(
+    const enriched = await Promise.all(
       grants.map((va) =>
         this.enrichGrant(va, { achievement: true, volunteer: false, grantedBy: true }),
       ),
     );
+    // QA-FIX-MINE-3: filtrar grants huérfanos (logro borrado) para evitar
+    // crashes client-side al acceder a `g.achievement.tier`, `ach.name`,
+    // `ach.points` en PerfilSection.
+    return enriched.filter((g) => g.achievement !== null);
   }
 
   /** Lista los logros ganados por todos los voluntarios (vista admin). */

@@ -178,6 +178,11 @@ export class VolunteersService {
               : null;
             return { ...cl, class: cls };
           }),
+        ).then((items) =>
+          // QA-FIX-MINE-2: filtrar classLinks huérfanos (clase borrada) para
+          // evitar crashes client-side al acceder a `c.title`, `c.school`,
+          // `c.durationHours` o `c.date` en PerfilSection.
+          items.filter((l) => l.class !== null),
         ),
       ]);
 
