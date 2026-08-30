@@ -1538,3 +1538,29 @@ Stage Summary:
 - Token GitHub configurado localmente para futuras operaciones push.
 - Repositorio completamente sincronizado (0 commits adelante, 0 atrás).
 - El usuario puede probar el form de registro en Vercel — el dropdown de comité ahora debe llenarse correctamente con los comités existentes.
+
+---
+Task ID: CLEANUP-ORPHANS-1
+Agent: main (Z.ai Code)
+Task: Explicar por qué hay classVolunteers huérfanos (sin clases ni voluntarios existentes) y crear endpoint de limpieza.
+
+Work Log:
+- VLM analizó 2 screenshots del usuario:
+  - Screenshot 1: colección classVolunteers con ~14 docs (ej: classId GvOCxizsTze7INsDxgAC, volunteerId KtMgIarAAxBzzaOFFJrZ, role instructor, fecha 2026-08-02).
+  - Screenshot 2: colección volunteers con solo 1 admin visible (Kevin Elias Luna Palacios, carnet 20245109).
+- Diagnóstico: Firestore NO tiene foreign keys ni CASCADE. Los docs en classVolunteers quedaron huérfanos porque las clases y volunteers que referenciaban fueron borrados por medios distintos a la UI (consola Firestore directa, scripts legacy, mock-data inicial, etc.). El código de delete SÍ hace cascade (línea 372 en classes.service, línea 421 en volunteers.service), pero si el borrado fue externo a la app, los links quedan.
+- Creado endpoint POST /api/admin/cleanup-orphans (y GET para auditar sin borrar):
+  - Escanea classVolunteers, activityVolunteers, volunteerAchievements.
+  - Para cada doc, verifica si classId/activityId/achievementId y volunteerId referenciados aún existen.
+  - Borra los docs huérfanos y devuelve reporte detallado (scanned/deleted/orphanIds).
+  - Requiere rol privilegiado (admin/presidente/vice/líder) — requirePrivileged.
+- Push protection issue: el commit 9244750 (squash previo) tenía el token GitHub del usuario en texto plano dentro del worklog. GitHub Push Protection bloqueó el push con error GH013.
+- Fix: sed para reemplazar el token por [REDACTED_PAT] en worklog.md, luego git reset --soft origin/main + commit nuevo (squash) que agrupa el cleanup endpoint + la redacción. Push exitoso (9b5cad7..fb6397e).
+- Verificado: cero commits en el historial contienen el token.
+
+Stage Summary:
+- Endpoint /api/admin/cleanup-orphans disponible para que el admin borre los ~14 classVolunteers huérfanos del usuario.
+- Uso: el admin hace login, luego POST /api/admin/cleanup-orphans (con su JWT en Authorization header). Devuelve {scanned, deleted, orphanIds}.
+- También puede hacer GET /api/admin/cleanup-orphans primero para auditar sin borrar (devuelve orphanIds que se borrarían).
+- Patrón orphan-link ahora tiene solución: tanto defensive (los fixes QA-FIX-MINE-1/2/3 ya filtraban nulls client-side) como curativo (este endpoint los borra de la BD).
+- Token GitHub redactado del historial git. Push protection satisfecho.
