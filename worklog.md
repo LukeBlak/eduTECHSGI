@@ -1618,3 +1618,25 @@ Stage Summary:
 - Bug de user.role undefined resuelto: el role del JWT ahora se preserva al hacer refetch del volunteer.
 - La card 'Mantenimiento de datos' debería aparecer para roles privilegiados después del redeploy.
 - Para confirmar su rol real, el usuario debe decodificar el JWT (comando arriba), NO leer localStorage.getItem('edutech_user').
+
+---
+Task ID: FIX-ROLE-2
+Agent: main (Z.ai Code)
+Task: La card 'Mantenimiento de datos' no se renderiza en producción aunque el usuario sea admin (comando de búsqueda en DOM devolvió false).
+
+Work Log:
+- VLM analizó screenshot: comando `document.querySelectorAll` buscando la card devolvió `¿Card encontrada? false`. La card NO está en el DOM aunque el usuario es admin.
+- Verificado que el fix anterior (QA-FIX-ROLE-1, commit 6703036) SÍ está pushed a origin/main. Pero el problema persiste en producción.
+- Diagnóstico: el fix anterior preservaba el role del JWT al hacer refetch con volunteersApi.get, pero si el refetch llegaba ANTES del primer set (línea 51) o si el store Zustand no se había hidratado todavía cuando el Dashboard renderiza por primera vez, user.role seguía siendo undefined y isPrivileged() devolvía false → card oculta.
+- Fix defense-in-depth (commit 71a24c1):
+  - Nuevo helper `getRoleFromJwt()` en src/lib/api.ts: decodifica el JWT del localStorage/sessionStorage (key 'edutech_token') directamente en el cliente, sin esperar al store Zustand. El JWT es la fuente de verdad para auth — el role firmado es confiable.
+  - Nuevo helper `getEffectiveRole(storeRole) = storeRole ?? getRoleFromJwt()`.
+  - DashboardSection ahora usa `isPrivileged(getEffectiveRole(user?.role))` en vez de `isPrivileged(user?.role)`. Así, aunque el store no tenga el role todavía, el Dashboard puede mostrar la card para admins.
+- El JWT está disponible inmediatamente (localStorage es síncrono), así que el fallback funciona desde el primer render sin esperar a /api/auth/verify.
+- Lint: 0 errores, 3 warnings preexistentes.
+- Commit 71a24c1 + push exitoso (6703036..71a24c1).
+
+Stage Summary:
+- Card 'Mantenimiento de datos' ahora debería renderizarse para roles privilegiados SIN depender del timing del bootstrap() asincrónico.
+- El fallback al JWT garantiza que aunque el store Zustand tenga user.role undefined (por refetch lento, error de red, o cualquier otra razón), la card aparezca si el JWT firmado dice que el usuario es admin/president/vice/líder.
+- Para que el fix funcione en el browser del usuario: Ctrl+Shift+R (hard refresh) para descargar el nuevo bundle.
