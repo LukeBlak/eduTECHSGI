@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -57,6 +57,13 @@ export function AdminMaintenanceCard() {
   const [cleaning, setCleaning] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastResult, setLastResult] = useState<OrphanCleanupResult | null>(null);
+
+  // QA-DEBUG-MAINT-CARD: log de diagnóstico para confirmar que el componente
+  // se monta. Si este log aparece en la consola del browser, la card está
+  // renderizada. Si NO aparece, el componente no se está montando.
+  useEffect(() => {
+    console.log("[AdminMaintenanceCard] mounted ✓");
+  }, []);
 
   async function handleAudit() {
     setAuditing(true);
