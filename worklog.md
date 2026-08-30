@@ -1589,3 +1589,32 @@ Stage Summary:
 - Card 'Mantenimiento de datos' disponible en el Dashboard para roles privilegiados. Ya no hay que correr fetch en la consola.
 - El problema de 401 era usar la key equivocada del localStorage; ahora fetchApi maneja el JWT automáticamente.
 - El usuario puede auditar (sin borrar) y limpiar (con confirmación) los classVolunteers huérfanos que reportó (~14 docs) desde la UI directamente.
+
+---
+Task ID: FIX-ROLE-1
+Agent: main (Z.ai Code)
+Task: Fix user.role undefined aunque logueado como vicepresidente/presidente — ocultaba card Mantenimiento de datos.
+
+Work Log:
+- VLM analizó screenshot: usuario ejecutó `JSON.parse(localStorage.getItem('edutech_user'))?.role` en consola y devolvió `undefined`.
+- Diagnóstico inicial: el comando estaba mal — el user NO se persiste en localStorage bajo 'edutech_user', solo el token bajo 'edutech_token'. El user vive en memoria Zustand. Pero el síntoma (no ver la card) era real.
+- Investigación del flujo bootstrap() en auth-store.ts:
+  1. getToken() → lee JWT de localStorage/sessionStorage (key 'edutech_token').
+  2. authApi.verify() → backend decodifica JWT, devuelve {valid, user: {userId, role, name, studentId}}.
+  3. set({user: {role: jwtUser.role, ...}}) — role correcto del JWT.
+  4. Refetch: volunteersApi.get(jwtUser.userId) → set({user: meSafe}) — AQUÍ ESTABA EL BUG.
+- Bug: el set en paso 4 sobreescribía todo el user con la respuesta de volunteersApi.get. Si el doc de Firestore no tenía el campo 'role' (o llegaba como undefined), user.role quedaba undefined → isPrivileged(user?.role) devolvía false → card oculta.
+- Fix aplicado (commit 6703036): merge en vez de overwrite. El role del refetch solo se usa si es truthy; si no, se preserva el del JWT (fuente de verdad para auth).
+- Comando correcto para que el usuario verifique su rol (decodificar JWT):
+  ```js
+  const t = localStorage.getItem('edutech_token') || sessionStorage.getItem('edutech_token');
+  const p = JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+  console.log('role:', p.role, '— privilegiado:', ['admin','president','vice_president','committee_leader'].includes(p.role));
+  ```
+- Lint: 0 errores, 3 warnings preexistentes.
+- Commit 6703036 + push exitoso (7a5125c..6703036).
+
+Stage Summary:
+- Bug de user.role undefined resuelto: el role del JWT ahora se preserva al hacer refetch del volunteer.
+- La card 'Mantenimiento de datos' debería aparecer para roles privilegiados después del redeploy.
+- Para confirmar su rol real, el usuario debe decodificar el JWT (comando arriba), NO leer localStorage.getItem('edutech_user').
