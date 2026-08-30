@@ -140,16 +140,61 @@ export async function findAll<T = DocumentData>(
   const hasWhere = !!opts?.where && Object.keys(opts.where).length > 0;
   const hasOrderBy = !!opts?.orderBy;
 
-  // Aplicar where clauses SIEMPRE al query nativo (equality no necesita composite index).
-  if (hasWhere) {
-    for (const [field, condition] of Object.entries(opts!.where!)) {
-      if (condition && typeof condition === "object" && "op" in (condition as any)) {
-        const c = condition as { op: WhereFilterOp; value: unknown };
-        q = q.where(field, c.op, c.value);
-      } else {
-        q = q.where(field, "==", condition);
+  // QA-FIX-NOTIF-2: Firestore Admin SDK requiere composite index para
+  // queries con múltiples `.where()` en campos diferentes, incluso si
+  // son equality (`==`). Como no podemos garantizar que todos los
+  // composite indexes existan en producción, aplicamos solo el PRIMER
+  // where al query nativo (single-field index auto-creado) y filtramos
+  // los demás where clauses client-side después del fetch.
+  //
+  // Estrategia:
+  //  - 0 where clauses → query directo.
+  //  - 1 where clause → query nativo con ese where (single-field index).
+  //  - 2+ where clauses → solo el primero va al query nativo; el resto
+  //    se filtra en memoria con .filter() después del fetch.
+  const whereEntries: [string, unknown][] = hasWhere
+    ? Object.entries(opts!.where!)
+    : [];
+
+  if (whereEntries.length > 0) {
+    const [firstField, firstCondition] = whereEntries[0];
+    if (
+      firstCondition &&
+      typeof firstCondition === "object" &&
+      "op" in (firstCondition as { op: unknown })
+    ) {
+      const c = firstCondition as { op: WhereFilterOp; value: unknown };
+      q = q.where(firstField, c.op, c.value);
+    } else {
+      q = q.where(firstField, "==", firstCondition);
+    }
+  }
+
+  // Función helper para aplicar una condición a un doc client-side.
+  function matchesCondition(
+    doc: Record<string, unknown>,
+    field: string,
+    condition: unknown,
+  ): boolean {
+    if (
+      condition &&
+      typeof condition === "object" &&
+      "op" in (condition as { op: unknown })
+    ) {
+      const c = condition as { op: string; value: unknown };
+      const val = doc[field];
+      switch (c.op) {
+        case "==":
+          return val === c.value;
+        case "in":
+          return Array.isArray(c.value) && c.value.includes(val);
+        case "!=":
+          return val !== c.value;
+        default:
+          return val === c.value;
       }
     }
+    return doc[field] === condition;
   }
 
   // Estrategia anti-composite-index:
@@ -157,18 +202,35 @@ export async function findAll<T = DocumentData>(
   //  - Si hay where + orderBy → NO usar orderBy nativo (requeriría composite index).
   //    Hacemos el sort client-side después del fetch.
   const needsClientSideSort = hasWhere && hasOrderBy;
+  // QA-FIX-NOTIF-2: también necesitamos sort client-side cuando hay 2+
+  // where clauses (porque filtramos client-side los where extra).
+  const needsClientSideFilter = whereEntries.length > 1;
   if (hasOrderBy && !needsClientSideSort) {
     q = q.orderBy(opts!.orderBy!.field, opts!.orderBy!.direction ?? "asc");
   }
 
-  // Si vamos a sortear client-side, NO aplicamos limit al query nativo (necesitamos
-  // todos los docs para ordenar correctamente antes de aplicar limit).
-  if (opts?.limit && !needsClientSideSort) {
+  // Si vamos a sortear o filtrar client-side, NO aplicamos limit al query
+  // nativo (necesitamos todos los docs para filtrar/ordenar correctamente).
+  if (opts?.limit && !needsClientSideSort && !needsClientSideFilter) {
     q = q.limit(opts.limit);
   }
 
   const snap = await q.get();
   let results = snap.docs.map((d) => ({ id: d.id, ...(d.data() as T) }));
+
+  // QA-FIX-NOTIF-2: aplicar filtros where restantes client-side (índices 1+).
+  // El primer where ya se aplicó al query nativo; este loop aplica los demás.
+  if (needsClientSideFilter) {
+    results = results.filter((r) => {
+      const doc = r as Record<string, unknown>;
+      // Saltamos el índice 0 (ya aplicado al query nativo).
+      for (let i = 1; i < whereEntries.length; i++) {
+        const [field, condition] = whereEntries[i];
+        if (!matchesCondition(doc, field, condition)) return false;
+      }
+      return true;
+    });
+  }
 
   // Sort client-side si where + orderBy (evita composite index).
   if (needsClientSideSort) {
@@ -185,8 +247,8 @@ export async function findAll<T = DocumentData>(
     results = results.slice(opts.offset);
   }
 
-  // limit se aplica DESPUÉS del sort client-side (para que el top-N sea correcto).
-  if (opts?.limit && needsClientSideSort) {
+  // limit se aplica DESPUÉS del sort/filter client-side (para que el top-N sea correcto).
+  if (opts?.limit && (needsClientSideSort || needsClientSideFilter)) {
     results = results.slice(0, opts.limit);
   }
 
