@@ -72,7 +72,21 @@ export const useAuthStore = create<AuthState>((set) => ({
             // Strip password si viniera incluido (defensivo — el backend ya
             // sanitiza, pero no confiamos ciegamente).
             const { password: _pw, ...meSafe } = me as { password?: string };
-            set({ user: meSafe as AuthUser });
+            // QA-FIX-ROLE-1: preservar el role del JWT si el refetch de
+            // volunteersApi.get no trae un role válido. Antes, el set
+            // sobreescribía todo el user incluyendo el role, lo que si el
+            // doc de Firestore no tenía el campo `role` (o llegaba como
+            // undefined), hacía que user.role quedara undefined y
+            // isPrivileged() devolviera false — ocultando la card de
+            // Mantenimiento de datos y otros features de admin.
+            const safeUser = {
+              ...(meSafe as Record<string, unknown>),
+              // Si el refetch trae un role válido, úsalo. Si no, preserva
+              // el del JWT (que es la fuente de verdad para auth).
+              role:
+                (meSafe as { role?: string }).role ?? jwtUser.role,
+            } as AuthUser;
+            set({ user: safeUser });
           }
         } catch {
           /* ignore — keep minimal user */
