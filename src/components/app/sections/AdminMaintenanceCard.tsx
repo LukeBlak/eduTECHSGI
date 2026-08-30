@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -13,11 +13,21 @@ import {
   Users2,
   CalendarDays,
   Trophy,
-  RefreshCw,
+  ChevronDown,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -31,10 +41,16 @@ import {
   type OrphanAuditReport,
   type OrphanCleanupResult,
 } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 /**
  * AdminMaintenanceCard — Tarjeta de mantenimiento de datos para roles
  * privilegiados (admin, presidente, vice_presidente, líder de comité).
+ *
+ * Es COLAPSABLE y está CERRADA por defecto para que no estorbe cuando no
+ * se use. Solo el header (con título e indicador de huérfanos) se ve
+ * cuando está cerrada; al hacer click se expande para mostrar los
+ * botones de auditar y limpiar.
  *
  * Expone dos acciones:
  *  1. Auditar: llama a GET /api/admin/cleanup-orphans y muestra un
@@ -48,8 +64,7 @@ import {
  * inicial), los docs en classVolunteers/activityVolunteers/
  * volunteerAchievements quedan apuntando a IDs inexistentes. Esta
  * tarjeta permite al admin limpiarlos sin tener que correr fetch
- * commands en la consola del browser (que era propenso a errores
- * como el 401 por usar la key equivocada del localStorage).
+ * commands en la consola del browser.
  */
 export function AdminMaintenanceCard() {
   const [audit, setAudit] = useState<OrphanAuditReport | null>(null);
@@ -57,13 +72,8 @@ export function AdminMaintenanceCard() {
   const [cleaning, setCleaning] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [lastResult, setLastResult] = useState<OrphanCleanupResult | null>(null);
-
-  // QA-DEBUG-MAINT-CARD: log de diagnóstico para confirmar que el componente
-  // se monta. Si este log aparece en la consola del browser, la card está
-  // renderizada. Si NO aparece, el componente no se está montando.
-  useEffect(() => {
-    console.log("[AdminMaintenanceCard] mounted ✓");
-  }, []);
+  // Colapsable y CERRADA por defecto — el admin solo la abre cuando la necesite.
+  const [isOpen, setIsOpen] = useState(false);
 
   async function handleAudit() {
     setAuditing(true);
@@ -128,135 +138,156 @@ export function AdminMaintenanceCard() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <Card className="ring-1 ring-amber-500/15 bg-gradient-to-br from-amber-50/40 to-transparent dark:from-amber-950/10">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <div className="size-8 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
-                <Database className="size-4" />
-              </div>
-              Mantenimiento de datos
-              {totalOrphans > 0 && (
-                <Badge
-                  variant="outline"
-                  className="text-amber-700 border-amber-300 bg-amber-100/60 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-950/40"
-                >
-                  <AlertTriangle className="size-3 mr-1" />
-                  {totalOrphans} huérfanos
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              Firestore no tiene <span className="font-medium">foreign keys</span>{" "}
-              ni <span className="font-medium">CASCADE</span>. Cuando se
-              borran clases, actividades, logros o voluntarios por medios
-              externos a la app (consola Firestore directa, scripts legacy),
-              los documentos en las colecciones de join (
-              <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
-                classVolunteers
-              </code>
-              ,{" "}
-              <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
-                activityVolunteers
-              </code>
-              ,{" "}
-              <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
-                volunteerAchievements
-              </code>
-              ) pueden quedar apuntando a IDs inexistentes. Esta herramienta
-              los detecta y los borra.
-            </p>
+        <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+          <Card className="ring-1 ring-amber-500/15 bg-gradient-to-br from-amber-50/40 to-transparent dark:from-amber-950/10">
+            {/* Header siempre visible — funciona como trigger para abrir/cerrar */}
+            <CollapsibleTrigger asChild>
+              <button
+                type="button"
+                className="w-full text-left hover:bg-amber-50/50 dark:hover:bg-amber-950/20 transition-colors rounded-t-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40"
+                aria-expanded={isOpen}
+              >
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <div className="size-8 rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                      <Database className="size-4" />
+                    </div>
+                    <span className="flex-1">Mantenimiento de datos</span>
+                    {totalOrphans > 0 && (
+                      <Badge
+                        variant="outline"
+                        className="text-amber-700 border-amber-300 bg-amber-100/60 dark:text-amber-300 dark:border-amber-800 dark:bg-amber-950/40"
+                      >
+                        <AlertTriangle className="size-3 mr-1" />
+                        {totalOrphans} huérfanos
+                      </Badge>
+                    )}
+                    <ChevronDown
+                      className={cn(
+                        "size-4 text-muted-foreground transition-transform shrink-0",
+                        isOpen && "rotate-180",
+                      )}
+                    />
+                  </CardTitle>
+                </CardHeader>
+              </button>
+            </CollapsibleTrigger>
 
-            {/* Resultado de auditoría o limpieza */}
-            {(audit || lastResult) && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <OrphanStatCard
-                  icon={Users2}
-                  label="classVolunteers"
-                  scanned={audit?.scanned.classVolunteers ?? 0}
-                  orphans={
-                    audit?.orphansFound.classVolunteers ??
-                    lastResult?.deleted.classVolunteers ??
-                    0
-                  }
-                  done={!!lastResult}
-                />
-                <OrphanStatCard
-                  icon={CalendarDays}
-                  label="activityVolunteers"
-                  scanned={audit?.scanned.activityVolunteers ?? 0}
-                  orphans={
-                    audit?.orphansFound.activityVolunteers ??
-                    lastResult?.deleted.activityVolunteers ??
-                    0
-                  }
-                  done={!!lastResult}
-                />
-                <OrphanStatCard
-                  icon={Trophy}
-                  label="volunteerAchievements"
-                  scanned={audit?.scanned.volunteerAchievements ?? 0}
-                  orphans={
-                    audit?.orphansFound.volunteerAchievements ??
-                    lastResult?.deleted.volunteerAchievements ??
-                    0
-                  }
-                  done={!!lastResult}
-                />
-              </div>
-            )}
-
-            {lastResult && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900">
-                <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                  {lastResult.message}
+            {/* Contenido colapsable — solo se renderiza cuando está abierta */}
+            <CollapsibleContent>
+              <CardContent className="space-y-4 pt-0">
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Firestore no tiene <span className="font-medium">foreign keys</span>{" "}
+                  ni <span className="font-medium">CASCADE</span>. Cuando se
+                  borran clases, actividades, logros o voluntarios por medios
+                  externos a la app (consola Firestore directa, scripts legacy),
+                  los documentos en las colecciones de join (
+                  <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
+                    classVolunteers
+                  </code>
+                  ,{" "}
+                  <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
+                    activityVolunteers
+                  </code>
+                  ,{" "}
+                  <code className="text-[10px] bg-muted px-1 py-0.5 rounded">
+                    volunteerAchievements
+                  </code>
+                  ) pueden quedar apuntando a IDs inexistentes. Esta
+                  herramienta los detecta y los borra.
                 </p>
-              </div>
-            )}
 
-            {/* Botones de acción */}
-            <div className="flex flex-col sm:flex-row gap-2">
-              <Button
-                variant="outline"
-                onClick={handleAudit}
-                disabled={auditing || cleaning}
-                className="flex-1"
-              >
-                {auditing ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Search className="size-4" />
+                {/* Resultado de auditoría o limpieza */}
+                {(audit || lastResult) && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <OrphanStatCard
+                      icon={Users2}
+                      label="classVolunteers"
+                      scanned={audit?.scanned.classVolunteers ?? 0}
+                      orphans={
+                        audit?.orphansFound.classVolunteers ??
+                        lastResult?.deleted.classVolunteers ??
+                        0
+                      }
+                      done={!!lastResult}
+                    />
+                    <OrphanStatCard
+                      icon={CalendarDays}
+                      label="activityVolunteers"
+                      scanned={audit?.scanned.activityVolunteers ?? 0}
+                      orphans={
+                        audit?.orphansFound.activityVolunteers ??
+                        lastResult?.deleted.activityVolunteers ??
+                        0
+                      }
+                      done={!!lastResult}
+                    />
+                    <OrphanStatCard
+                      icon={Trophy}
+                      label="volunteerAchievements"
+                      scanned={audit?.scanned.volunteerAchievements ?? 0}
+                      orphans={
+                        audit?.orphansFound.volunteerAchievements ??
+                        lastResult?.deleted.volunteerAchievements ??
+                        0
+                      }
+                      done={!!lastResult}
+                    />
+                  </div>
                 )}
-                Auditar huérfanos
-              </Button>
-              <Button
-                onClick={() => setConfirmOpen(true)}
-                disabled={
-                  cleaning ||
-                  auditing ||
-                  (audit !== null && totalOrphans === 0)
-                }
-                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white border-amber-600/20"
-              >
-                {cleaning ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Trash2 className="size-4" />
-                )}
-                Limpiar huérfanos
-              </Button>
-            </div>
 
-            {/* Hint si no se ha auditado */}
-            {!audit && !lastResult && (
-              <p className="text-[11px] text-muted-foreground/70 text-center">
-                Tip: audita primero para ver cuántos hay antes de borrar.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                {lastResult && (
+                  <div className="flex items-start gap-2 p-3 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900">
+                    <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                      {lastResult.message}
+                    </p>
+                  </div>
+                )}
+
+                {/* Botones de acción */}
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleAudit}
+                    disabled={auditing || cleaning}
+                    className="flex-1"
+                  >
+                    {auditing ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Search className="size-4" />
+                    )}
+                    Auditar huérfanos
+                  </Button>
+                  <Button
+                    onClick={() => setConfirmOpen(true)}
+                    disabled={
+                      cleaning ||
+                      auditing ||
+                      (audit !== null && totalOrphans === 0)
+                    }
+                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-white border-amber-600/20"
+                  >
+                    {cleaning ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                    Limpiar huérfanos
+                  </Button>
+                </div>
+
+                {/* Hint si no se ha auditado */}
+                {!audit && !lastResult && (
+                  <p className="text-[11px] text-muted-foreground/70 text-center">
+                    Tip: audita primero para ver cuántos hay antes de borrar.
+                  </p>
+                )}
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
       </motion.div>
 
       {/* Diálogo de confirmación antes de borrar */}
