@@ -1688,3 +1688,27 @@ Stage Summary:
 - El 500 en /api/notifications debería resolverse definitivamente después del redeploy.
 - La card 'Mantenimiento de datos' está renderizada sin condición — aparece SIEMPRE en admin dashboard.
 - Para verificar: hard refresh (Ctrl+Shift+R) tras el redeploy de Vercel.
+
+---
+Task ID: MAINT-CARD-COLLAPSIBLE-1
+Agent: main (Z.ai Code)
+Task: Mover la card 'Mantenimiento de datos' al final del dashboard y hacerla colapsable (cerrada por defecto).
+
+Work Log:
+- Usuario confirmó: la card SÍ funciona al inicio del dashboard (era problema de scroll). Pidió ponerla al final final porque es algo que no usará siempre.
+- Refactorizado AdminMaintenanceCard.tsx con Collapsible de shadcn/ui:
+  - CardHeader ahora es CollapsibleTrigger (click para abrir/cerrar).
+  - CardContent dentro de CollapsibleContent (solo renderiza cuando abierta).
+  - ChevronDown rotea 180° como indicador visual de estado.
+  - Estado `isOpen` por defecto = false (cerrada).
+  - Solo el header (icono + título + badge de huérfanos si hay) se ve cuando cerrada.
+- Movida la card de vuelta al final del DashboardSection (después de 'Mis registros recientes').
+- Quitado el console.log de debug '[AdminMaintenanceCard] mounted ✓'.
+- Lint: 0 errores, 3 warnings preexistentes.
+- Commit c5a8a41 + push exitoso (aebdc99..c5a8a41).
+
+Stage Summary:
+- Card 'Mantenimiento de datos' ahora al final del dashboard, colapsable y cerrada por defecto.
+- No estorba cuando no se usa — solo el header compacto se ve.
+- Al hacer click en el header, se expande y muestra los botones Auditar/Limpiar.
+- Badge con conteo de huérfanos visible en el header si los hay (incluso cerrada).
