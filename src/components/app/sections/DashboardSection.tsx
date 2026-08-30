@@ -250,6 +250,13 @@ export function DashboardSection() {
         }
       />
 
+      {/* QA-DEBUG-MAINT-CARD: movida temporalmente al INICIO del dashboard
+          para descartar si el problema es de scroll (card al final no visible)
+          o de montaje (componente no se renderiza). Si aparece aquí arriba,
+          el problema era scroll/CSS. Si sigue sin aparecer, es un bug de
+          montaje. */}
+      <AdminMaintenanceCard />
+
       {/* Print-only header */}
       <div data-print-header className="mb-6">
         <div className="flex items-center justify-between border-b-2 border-primary pb-3 mb-4">
@@ -1412,14 +1419,9 @@ function VolunteerDashboard({
           volunteerAchievements quedan huérfanos. Esta card permite al admin
           auditarlos y borrarlos sin tener que correr fetch commands en la consola.
 
-          QA-FIX-ROLE-3: quitamos la condición isPrivileged(getEffectiveRole(user?.role))
-          porque el check depende del store Zustand que se hidrata asincrónicamente
-          y en producción (Vercel) la card no aparecía aunque el usuario fuera
-          admin. El backend ya valida con requirePrivileged en POST /api/admin/
-          cleanup-orphans, así que aunque la card se vea para un volunteer, el
-          botón "Limpiar" devolverá 403 si no tiene permiso. Es más seguro tener
-          la card siempre visible y dejar que el backend haga el gate real. */}
-      <AdminMaintenanceCard />
+          QA-FIX-ROLE-3: card movida temporalmente al inicio del dashboard
+          para debug (ver comentario arriba). Una vez confirmado que aparece,
+          volver a colocar al final. */}
     </motion.div>
   );
 }
