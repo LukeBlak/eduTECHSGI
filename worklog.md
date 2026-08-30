@@ -1492,3 +1492,29 @@ Stage Summary:
 - Patrón de bug ORPHAN-LINK auditado y cerrado en 3 relaciones: activityLinks (QA-FIX-MINE-1), classLinks (QA-FIX-MINE-2), volunteerAchievements (QA-FIX-MINE-3).
 - La regla arquitectónica ahora clara: cualquier endpoint que haga join manual en Firestore debe filtrar resultados cuyo joined-entity sea null, porque Firestore no tiene CASCADE ni foreign keys.
 - Repositorio GitHub actualizado: origin/main == main local (commit fce0551).
+
+---
+Task ID: FIX-REGISTER-1
+Agent: main (Z.ai Code)
+Task: Fix bug — formulario de registro no carga comités (dropdown vacío dice 'No hay comités' aunque sí existan en Firestore).
+
+Work Log:
+- VLM analizó 2 screenshots del usuario:
+  - Screenshot 1: Firestore Console mostrando comité 'Logística' (color: violet, description: 'Coordinación operativa y eventos') — confirma que SÍ hay comités en la BD.
+  - Screenshot 2: Form 'Crear cuenta' / 'Regístrate como voluntario' con dropdown 'Comité' marcado 'Obligatorio' pero mostrando placeholder 'Selecciona un comité' (vacío). Console del browser muestra `Failed to load resource: 401` para `/api/committees`.
+- Diagnóstico: `LoginScreen.tsx` (línea 116) llamaba `committeesApi.list()` → `GET /api/committees` que requiere auth (`requireAuth(req)` en CommitteesController.list línea 15). Un usuario no-logueado recibía 401 y el dropdown se quedaba vacío.
+- Fix aplicado (commit add1d27):
+  - Nuevo endpoint PÚBLICO `GET /api/committees/public` (sin auth) que devuelve solo {id, name, color} — sin datos sensibles (miembros, actividades, clases).
+  - `CommitteesService.listPublic()` — solo id/name/color, sin joins, orderBy name asc.
+  - `CommitteesController.publicList()` — sin `requireAuth`, devuelve directamente la lista pública.
+  - Nueva ruta `src/app/api/committees/public/route.ts` con `force-dynamic`.
+  - `committeesApi.publicList()` agregado a `src/lib/api.ts`.
+  - `LoginScreen.tsx` línea 116 ahora usa `publicList()` en vez de `list()`.
+- Bonus fix: removida ruta duplicada `src/app/api/reports/ods-project/[projectId]/route.ts` que colisionaba con `[id]/route.ts` y rompía el dev server con error 'You cannot use different slug names for the same dynamic path (id !== projectId)'. Ambas rutas llamaban al mismo método `ReportsController.odsProject(req, id)` — eran duplicados exactos. Se eliminó `[projectId]` y se mantuvo `[id]` (que tiene force-dynamic + comentario).
+- Lint: 0 errores, 3 warnings preexistentes no relacionados.
+- Verificación local: endpoint /api/committees/public responde 500 con `FirebaseUnavailableError` (sandbox no tiene creds Firebase), pero la ruta existe y no da 401 — en producción (Vercel con creds) devolverá 200 con la lista de comités. /api/health → 200 confirma que el server funciona.
+
+Stage Summary:
+- Dropdown de comité en form de registro ahora usará endpoint público sin auth → se llenará correctamente en Vercel.
+- Ruta duplicada /api/reports/ods-project/[projectId] eliminada → dev server ya no se rompe con 'slug name mismatch'.
+- Commit add1d27 creado localmente. PUSH PENDIENTE — token GitHub del usuario (ghp_MNTKFtr4...) fue rechazado por GitHub con 'Invalid username or token'. Necesito que el usuario genere un PAT nuevo.
