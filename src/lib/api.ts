@@ -572,6 +572,53 @@ export const committeesApi = {
   remove: (id: string) => fetchApi<{ success: boolean }>(`/committees/${id}`, { method: "DELETE" }),
 };
 
+/* ============ Admin / Mantenimiento ============ */
+
+export interface OrphanAuditReport {
+  scanned: {
+    classVolunteers: number;
+    activityVolunteers: number;
+    volunteerAchievements: number;
+  };
+  orphansFound: {
+    classVolunteers: number;
+    activityVolunteers: number;
+    volunteerAchievements: number;
+  };
+  orphanIds: {
+    classVolunteers: string[];
+    activityVolunteers: string[];
+    volunteerAchievements: string[];
+  };
+}
+
+export interface OrphanCleanupResult extends OrphanAuditReport {
+  success: boolean;
+  message: string;
+  deleted: {
+    classVolunteers: number;
+    activityVolunteers: number;
+    volunteerAchievements: number;
+  };
+}
+
+/**
+ * API de administración / mantenimiento. Solo disponible para roles
+ * privilegiados (admin, presidente, vice_presidente, committee_leader).
+ *
+ * fetchApi añade automáticamente el header Authorization con el JWT
+ * guardado en localStorage/sessionStorage (key `edutech_token`), por
+ * eso NO hay que pasar el token manualmente — a diferencia de un
+ * `fetch` crudo en la consola del navegador.
+ */
+export const adminApi = {
+  /** Audita (sin borrar) los docs huérfanos en colecciones de join. */
+  auditOrphans: () => fetchApi<OrphanAuditReport>("/admin/cleanup-orphans"),
+  /** Borra los docs huérfanos encontrados. Devuelve reporte de qué se borró. */
+  cleanupOrphans: () =>
+    fetchApi<OrphanCleanupResult>("/admin/cleanup-orphans", { method: "POST" }),
+};
+
 /* ============ Activities ============ */
 
 export const activitiesApi = {

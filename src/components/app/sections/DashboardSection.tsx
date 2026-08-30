@@ -52,11 +52,13 @@ import {
   committeesApi,
   formatCurrency,
   formatDate,
+  isPrivileged,
   type DashboardData,
   type VolunteerHours,
   type Committee,
 } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
+import { AdminMaintenanceCard } from "./AdminMaintenanceCard";
 import { StatCard, SectionHeader, EmptyState, KpiCard } from "../Shared";
 import { BrandLogo } from "../BrandLogo";
 import { useRealtimeRefresh } from "../realtime/RealtimeProvider";
@@ -1404,6 +1406,13 @@ function VolunteerDashboard({
           )}
         </CardContent>
       </Card>
+
+      {/* Mantenimiento de datos — solo roles privilegiados (admin/presidente/vice/líder).
+          Firestore no tiene FK CASCADE: cuando se borran clases/actividades/logros
+          por medios externos, los docs en classVolunteers/activityVolunteers/
+          volunteerAchievements quedan huérfanos. Esta card permite al admin
+          auditarlos y borrarlos sin tener que correr fetch commands en la consola. */}
+      {isPrivileged(user?.role) && <AdminMaintenanceCard />}
     </motion.div>
   );
 }
