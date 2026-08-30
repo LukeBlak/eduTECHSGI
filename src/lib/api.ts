@@ -180,6 +180,56 @@ export function canApproveHours(role: Role | undefined | null): boolean {
   return !!role && APPROVER_ROLES.includes(role);
 }
 
+/**
+ * Decodifica el JWT guardado en localStorage/sessionStorage (key
+ * `edutech_token`) y retorna el role firmado en el payload.
+ *
+ * QA-FIX-ROLE-2: fallback defensivo para cuando el store Zustand aún
+ * no se ha hidratado (o el refetch de volunteersApi.get pisa el role
+ * con undefined). El JWT es la fuente de verdad para auth — si el token
+ * existe y es válido, podemos confiar en el role que lleva firmado.
+ *
+ * Retorna null si no hay token, está malformado, o el payload no
+ * tiene campo `role`.
+ */
+export function getRoleFromJwt(): Role | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const token =
+      window.localStorage.getItem(TOKEN_KEY) ||
+      window.sessionStorage.getItem(TOKEN_KEY);
+    if (!token) return null;
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // Payload es la 2da parte, base64-url-encoded.
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const json = decodeURIComponent(
+      atob(padded)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join(""),
+    );
+    const payload = JSON.parse(json) as { role?: Role };
+    return payload.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retorna el role efectivo del usuario: primero el del store Zustand
+ * (si está hidratado y tiene role), y como fallback el del JWT.
+ *
+ * Usar en componentes que necesiten saber el role SIN depender del
+ * timing del bootstrap() asincrónico.
+ */
+export function getEffectiveRole(
+  storeRole: Role | undefined | null,
+): Role | null {
+  return storeRole ?? getRoleFromJwt();
+}
+
 export type HourType = "admin" | "field";
 export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type HourRequestStatus = "pending" | "approved" | "rejected";

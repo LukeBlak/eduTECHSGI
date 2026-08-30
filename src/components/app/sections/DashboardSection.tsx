@@ -53,6 +53,7 @@ import {
   formatCurrency,
   formatDate,
   isPrivileged,
+  getEffectiveRole,
   type DashboardData,
   type VolunteerHours,
   type Committee,
@@ -1411,8 +1412,11 @@ function VolunteerDashboard({
           Firestore no tiene FK CASCADE: cuando se borran clases/actividades/logros
           por medios externos, los docs en classVolunteers/activityVolunteers/
           volunteerAchievements quedan huérfanos. Esta card permite al admin
-          auditarlos y borrarlos sin tener que correr fetch commands en la consola. */}
-      {isPrivileged(user?.role) && <AdminMaintenanceCard />}
+          auditarlos y borrarlos sin tener que correr fetch commands en la consola.
+          QA-FIX-ROLE-2: usar getEffectiveRole() que hace fallback al JWT del
+          localStorage si el store Zustand aún no se ha hidratado o el refetch
+          de volunteersApi.get pisó el role con undefined. */}
+      {isPrivileged(getEffectiveRole(user?.role)) && <AdminMaintenanceCard />}
     </motion.div>
   );
 }
