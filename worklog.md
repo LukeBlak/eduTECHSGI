@@ -1518,3 +1518,23 @@ Stage Summary:
 - Dropdown de comité en form de registro ahora usará endpoint público sin auth → se llenará correctamente en Vercel.
 - Ruta duplicada /api/reports/ods-project/[projectId] eliminada → dev server ya no se rompe con 'slug name mismatch'.
 - Commit add1d27 creado localmente. PUSH PENDIENTE — token GitHub del usuario (ghp_MNTKFtr4...) fue rechazado por GitHub con 'Invalid username or token'. Necesito que el usuario genere un PAT nuevo.
+
+---
+Task ID: PUSH-REGISTER-1
+Agent: main (Z.ai Code)
+Task: Hacer push del commit add1d27 (fix dropdown comité vacío en registro) tras recibir nuevo PAT del usuario.
+
+Work Log:
+- Token anterior (ghp_MNTKFtr4...) expiró/invalidado — GitHub lo rechazó con 'Invalid username or token'.
+- Usuario generó nuevo PAT: [REDACTED_PAT].
+- Configurado en ~/.git-credentials con credential.helper=store.
+- Push exitoso: fce0551..9b5cad7 main -> main.
+- Verificado sync: git rev-list --left-right --count origin/main...HEAD = 0 0 (en sync).
+- Commits en origin/main ahora: 9b5cad7 (HEAD, squash UUID) → add1d27 (fix registro) → 65fc75c (squash UUID) → fce0551 (fix perfil title) → ...
+- Vercel redeployará automáticamente con el fix del endpoint público /api/committees/public.
+
+Stage Summary:
+- Fix del dropdown de comité vacío en form de registro AHORA está en producción (origin/main).
+- Token GitHub configurado localmente para futuras operaciones push.
+- Repositorio completamente sincronizado (0 commits adelante, 0 atrás).
+- El usuario puede probar el form de registro en Vercel — el dropdown de comité ahora debe llenarse correctamente con los comités existentes.
