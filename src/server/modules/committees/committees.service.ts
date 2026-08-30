@@ -89,6 +89,24 @@ export class CommitteesService {
     );
   }
 
+  /**
+   * Lista PÚBLICA de comités — solo id, name y color. Sin joins, sin
+   * datos sensibles (miembros, actividades, clases). Usada por el
+   * formulario de registro (LoginScreen) antes de que el usuario tenga
+   * sesión. Antes el registro llamaba a `list()` que requiere auth
+   * (401) y el dropdown aparecía vacío aunque existieran comités.
+   */
+  async listPublic() {
+    const committees = await this.fs.findAll<CommitteeDoc>('committees', {
+      orderBy: { field: 'name', direction: 'asc' },
+    });
+    return committees.map((c) => ({
+      id: c.id,
+      name: c.name,
+      color: c.color ?? null,
+    }));
+  }
+
   async getById(id: string) {
     const c = await this.fs.findById<CommitteeDoc>('committees', id);
     if (!c) return null;

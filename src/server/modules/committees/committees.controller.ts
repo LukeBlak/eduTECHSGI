@@ -20,6 +20,19 @@ export class CommitteesController {
     }
   }
 
+  /**
+   * Lista PÚBLICA de comités (solo id/name/color). No requiere auth.
+   * Usada por el formulario de registro antes de que el volunteer tenga
+   * sesión. No expone datos sensibles (miembros, actividades, clases).
+   */
+  async publicList() {
+    try {
+      return ok(await this.service.listPublic());
+    } catch (e) {
+      return serverError('Error al listar comités públicos', e);
+    }
+  }
+
   async getById(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
     try {
       const auth = requireAuth(req);

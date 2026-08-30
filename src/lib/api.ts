@@ -556,6 +556,13 @@ export const volunteersApi = {
 
 export const committeesApi = {
   list: () => fetchApi<Committee[]>("/committees"),
+  /**
+   * Lista PÚBLICA de comités (solo id/name/color). No requiere auth.
+   * Usada por el formulario de registro antes de que el volunteer
+   * tenga sesión. El endpoint regular `/committees` devuelve 401 sin
+   * auth, por eso existe esta variante pública.
+   */
+  publicList: () => fetchApi<{ id: string; name: string; color: string | null }[]>("/committees/public"),
   get: (id: string) => fetchApi<Committee & { members?: Volunteer[]; activities?: Activity[]; classes?: ClassItem[] }>(`/committees/${id}`),
   members: (id: string) => fetchApi<Volunteer[]>(`/committees/${id}/members`),
   create: (body: { name: string; description?: string; color?: string }) =>

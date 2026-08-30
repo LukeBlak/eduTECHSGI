@@ -113,8 +113,13 @@ export function LoginScreen() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    // QA-FIX-REGISTER-1: usar el endpoint PÚBLICO /api/committees/public
+    // (sin auth) porque el usuario aún no tiene sesión. Antes usábamos
+    // `committeesApi.list()` que devuelve 401 sin auth, dejando el
+    // dropdown de comité vacío en el form de registro aunque sí
+    // existieran comités en Firestore.
     committeesApi
-      .list()
+      .publicList()
       .then(setCommittees)
       .catch(() => {
         /* ignore — committees may be empty */
