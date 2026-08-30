@@ -52,8 +52,6 @@ import {
   committeesApi,
   formatCurrency,
   formatDate,
-  isPrivileged,
-  getEffectiveRole,
   type DashboardData,
   type VolunteerHours,
   type Committee,
@@ -1413,10 +1411,15 @@ function VolunteerDashboard({
           por medios externos, los docs en classVolunteers/activityVolunteers/
           volunteerAchievements quedan huérfanos. Esta card permite al admin
           auditarlos y borrarlos sin tener que correr fetch commands en la consola.
-          QA-FIX-ROLE-2: usar getEffectiveRole() que hace fallback al JWT del
-          localStorage si el store Zustand aún no se ha hidratado o el refetch
-          de volunteersApi.get pisó el role con undefined. */}
-      {isPrivileged(getEffectiveRole(user?.role)) && <AdminMaintenanceCard />}
+
+          QA-FIX-ROLE-3: quitamos la condición isPrivileged(getEffectiveRole(user?.role))
+          porque el check depende del store Zustand que se hidrata asincrónicamente
+          y en producción (Vercel) la card no aparecía aunque el usuario fuera
+          admin. El backend ya valida con requirePrivileged en POST /api/admin/
+          cleanup-orphans, así que aunque la card se vea para un volunteer, el
+          botón "Limpiar" devolverá 403 si no tiene permiso. Es más seguro tener
+          la card siempre visible y dejar que el backend haga el gate real. */}
+      <AdminMaintenanceCard />
     </motion.div>
   );
 }

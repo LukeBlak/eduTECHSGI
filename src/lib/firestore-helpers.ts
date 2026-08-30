@@ -213,25 +213,45 @@ export async function findOne<T = DocumentData>(
   return results[0] ?? null;
 }
 
-/** Cuenta docs que cumplan un where. */
+/**
+ * Cuenta docs que cumplan un where.
+ *
+ * QA-FIX-NOTIF-1: Firestore Admin SDK requiere composite index para
+ * queries con múltiples `.where()` en campos diferentes (ej: `userId`
+ * + `read`). Como no podemos garantizar que todos los composite indexes
+ * existan en producción, hacemos el count con `findAll` (que sortea
+ * client-side) y devolvemos `.length`. Es ligeramente menos eficiente
+ * para colecciones grandes, pero evita 500s por missing composite index
+ * — las colecciones de esta app son pequeñas (notifs por usuario, horas
+ * por voluntario, etc.), así que el overhead es despreciable.
+ */
 export async function count(
   collection: CollectionName,
   where?: WhereClause,
 ): Promise<number> {
-  const fs = requireFs();
-  let q: Query = fs.collection(COLLECTIONS[collection]);
-  if (where) {
-    for (const [field, condition] of Object.entries(where)) {
-      if (condition && typeof condition === "object" && "op" in (condition as any)) {
-        const c = condition as { op: WhereFilterOp; value: unknown };
-        q = q.where(field, c.op, c.value);
-      } else {
-        q = q.where(field, "==", condition);
+  // Si solo hay 0 o 1 condición, podemos usar el count nativo de Firestore
+  // (single-field index es auto-creado, no requiere composite).
+  const fieldCount = where ? Object.keys(where).length : 0;
+  if (fieldCount <= 1) {
+    const fs = requireFs();
+    let q: Query = fs.collection(COLLECTIONS[collection]);
+    if (where) {
+      for (const [field, condition] of Object.entries(where)) {
+        if (condition && typeof condition === "object" && "op" in (condition as any)) {
+          const c = condition as { op: WhereFilterOp; value: unknown };
+          q = q.where(field, c.op, c.value);
+        } else {
+          q = q.where(field, "==", condition);
+        }
       }
     }
+    const snap = await q.count().get();
+    return snap.data().count;
   }
-  const snap = await q.count().get();
-  return snap.data().count;
+  // 2+ condiciones → usar findAll (sortea client-side) para evitar
+  // el requisito de composite index.
+  const docs = await findAll(collection, { where });
+  return docs.length;
 }
 
 /* ─── WRITE ─────────────────────────────────────────────────────── */
